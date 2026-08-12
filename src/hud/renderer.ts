@@ -160,11 +160,13 @@ export class Hud {
   private async render() {
     // Подвал не только нумерует страницы, но и говорит, что делать
     // дальше: без подсказки неочевидно, что ответ продолжается.
+    // Подсказка объясняет, что делать дальше. Без неё неочевидно ни
+    // что ответ продолжается, ни что разговор можно закрыть голосом.
     const footer = this.isMultiPage
       ? (this.atLastPage
-          ? `${this.index + 1}/${this.pages.length} · тап — новый вопрос`
+          ? `${this.index + 1}/${this.pages.length} · тап — спросить · «хватит» — закрыть`
           : `${this.index + 1}/${this.pages.length} · тап — дальше`)
-      : '';
+      : 'тап — спросить · «хватит» — закрыть';
     const page = { title: this.title, body: this.pages[this.index] ?? '', footer };
     return this.enqueue(async () => {
       if (!this.created) { await this.bridge.createPage(page); this.created = true; return; }

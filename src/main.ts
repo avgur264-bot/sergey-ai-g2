@@ -7,6 +7,7 @@ import { Registry } from './agent/registry.ts';
 import { defaultTools } from './agent/tools/index.ts';
 import { Router } from './agent/router.ts';
 import { ERR, BRAND } from './hud/strings.ts';
+import { endsWithQuestion, isFarewell } from './agent/dialog.ts';
 import { loadConfig, type Config } from './config.ts';
 
 let bridge: Bridge;
@@ -355,9 +356,21 @@ async function startListening() {
   }
 }
 
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function think(question: string) {
   await setMic(false);
   stt = null;
+
+  // Разговор окончен: чистим контекст, чтобы следующая тема начиналась
+  // с нуля, и возвращаемся в покой.
+  if (isFarewell(question)) {
+    router.reset();
+    await hud.status(BRAND, 'До связи');
+    await delay(1200);
+    fsm.force('IDLE');
+    return;
+  }
 
   if (!fsm.to('THINKING')) return;
   await hud.status('ДУМАЮ', question);
@@ -387,6 +400,14 @@ async function think(question: string) {
     // Подпись стоит над любым ответом — и над мгновенным от инструмента,
     // и над обычным от модели.
     await hud.result(BRAND, turn.text);
+
+    // Ассистент задал уточняющий вопрос — включаем приём ответа сам.
+    // Заставлять тапать после вопроса неестественно: в разговоре на
+    // вопрос отвечают сразу, а не нажимают кнопку.
+    if (endsWithQuestion(turn.text)) {
+      await delay(1600);          // успеть прочитать вопрос
+      if (fsm.state === 'DISPLAYING') await startListening();
+    }
   } catch (e: any) {
     if (e?.name === 'AbortError') { fsm.force('IDLE'); return; }
     console.error(e);

@@ -17,6 +17,7 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.HTMLElement = window.HTMLElement;
 
 const WAKE = process.env.WAKE === '1';
+const MODE = process.env.MODE ?? '';
 window.localStorage.setItem('cfg', JSON.stringify({
   sttKey: 'dg', llmKey: 'sk-ant-x', city: 'Алматы',
   wakeEnabled: WAKE, wakeWord: 'сергей',
@@ -50,7 +51,11 @@ globalThis.fetch = async (url, init) => {
     const first = !body.messages.some((m) =>
       Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use'));
 
-    const events = first
+    const events = MODE === 'question' && !first
+      ? [
+          `data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'В каком городе искать?' } })}`,
+        ]
+      : first
       ? [
           `data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'places_near' } })}`,
           `data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"category":"ресторан"}' } })}`,
@@ -118,6 +123,23 @@ const sock = FakeWS.last;
 assert.ok(sock, 'распознавание должно открыться');
 sock.say('где поесть рядом');
 await new Promise((r) => setTimeout(r, 300));
+
+if (MODE === 'question') {
+  // Ассистент задал уточняющий вопрос — приём ответа обязан включиться
+  // сам, без тапа: в разговоре на вопрос отвечают сразу.
+  assert.match(hud(), /В каком городе/, 'вопрос должен появиться на экране');
+  await new Promise((r) => setTimeout(r, 2000));
+  assert.match(hud(), /СЛУШАЮ/, 'после вопроса микрофон включается сам');
+  console.log('✓ уточняющий вопрос: ответ принимается без тапа');
+
+  // Завершаем разговор голосом.
+  FakeWS.last.say('спасибо, хватит');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.match(hud(), /До связи/, 'прощание должно закрывать разговор');
+  console.log('✓ завершение разговора голосом');
+  process.exit(0);
+}
+
 
 assert.match(hud(), /Чайхана/, 'ответ должен появиться на экране');
 assert.match(hud(), /АРХИТЕКТОР/, 'подпись должна стоять над ответом');

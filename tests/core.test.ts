@@ -805,3 +805,29 @@ test('поиск включён по умолчанию — без него не
   const cfg = await loadConfig({ async get() { return null; } } as any);
   assert.equal(cfg.webSearch, true);
 });
+
+// ─── Ход разговора ───────────────────────────────────────────
+
+test('уточняющий вопрос распознаётся, обычный ответ — нет', async () => {
+  const { endsWithQuestion: isQ } = await import('../src/agent/dialog.ts');
+
+  assert.equal(isQ('В каком городе искать?'), true);
+  assert.equal(isQ('Плов Центр — ул. Регистан 12 — 4.6'), false);
+  assert.equal(isQ('Токио.'), false);
+  // Риторику за вопрос не считаем — на неё отвечать не надо.
+  assert.equal(isQ('Стоит попробовать. Почему бы и нет?'), false);
+});
+
+test('слова завершения закрывают разговор, похожие фразы — нет', async () => {
+  const { isFarewell: bye } = await import('../src/agent/dialog.ts');
+
+  assert.equal(bye('хватит'), true);
+  assert.equal(bye('Спасибо!'), true);
+  assert.equal(bye('всё, хватит'), true);
+  assert.equal(bye('достаточно.'), true);
+
+  // Те же слова внутри настоящего вопроса разговор не закрывают.
+  assert.equal(bye('хватит ли мне денег на билет'), false);
+  assert.equal(bye('спасибо скажи по-японски'), false);
+  assert.equal(bye('всё о фотосинтезе'), false);
+});

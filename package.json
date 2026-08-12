@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "worker:deploy": "cd worker && wrangler deploy",
-    "smoke": "npm run build && node --experimental-strip-types scripts/smoke-settings.mjs && node --experimental-strip-types scripts/smoke-main.mjs && WAKE=1 node --experimental-strip-types scripts/smoke-main.mjs"
+    "smoke": "npm run build && node --experimental-strip-types scripts/smoke-settings.mjs && node --experimental-strip-types scripts/smoke-main.mjs && MODE=question node --experimental-strip-types scripts/smoke-main.mjs && WAKE=1 node --experimental-strip-types scripts/smoke-main.mjs"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.12"

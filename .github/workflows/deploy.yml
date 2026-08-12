@@ -39,6 +39,7 @@ jobs:
           npx vite build
           node --experimental-strip-types scripts/smoke-settings.mjs
           node --experimental-strip-types scripts/smoke-main.mjs
+          MODE=question node --experimental-strip-types scripts/smoke-main.mjs
           WAKE=1 node --experimental-strip-types scripts/smoke-main.mjs
 
       - name: Собрать под GitHub Pages
