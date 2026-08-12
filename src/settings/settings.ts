@@ -68,7 +68,7 @@ function render(cfg: Partial<Config>) {
   statusEl.textContent = ready
     ? 'готово к работе'
     : !cfg.sttKey && !cfg.llmKey ? 'нужны оба ключа'
-    : !cfg.sttKey ? 'нужен ключ Soniox'
+    : !cfg.sttKey ? 'нужен ключ Deepgram'
     : 'нужен ключ модели';
 }
 

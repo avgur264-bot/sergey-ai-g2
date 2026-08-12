@@ -21,7 +21,7 @@
       "name": "network",
       "desc": "Запросы к сервисам распознавания речи, языковой модели, поиска и календаря.",
       "whitelist": [
-        "https://stt-rt.soniox.com",
+        "https://api.deepgram.com",
         "https://api.anthropic.com",
         "https://api.open-meteo.com",
         "https://api.tavily.com",

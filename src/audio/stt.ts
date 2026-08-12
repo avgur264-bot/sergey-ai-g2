@@ -1,14 +1,14 @@
 /**
- * Распознавание речи через Soniox Realtime.
+ * Распознавание речи через Deepgram Nova-3 (русский).
  *
- * PCM с очков приходит уже в нужном виде — 16 kHz mono 16-bit —
- * поэтому ресемплинг не нужен, но формат в конфиге стрима задаём явно.
- *
- * ⚠️ Точные имена полей конфига сверить с текущей докой Soniox:
- *    https://soniox.com/docs — API у них тоже меняется.
+ * Браузерный WebSocket не умеет ставить произвольные заголовки —
+ * Authorization передать нельзя. Deepgram для этого случая официально
+ * поддерживает передачу ключа через Sec-WebSocket-Protocol: второй
+ * аргумент конструктора WebSocket, массив ['token', apiKey].
+ * https://developers.deepgram.com/docs/using-the-sec-websocket-protocol
  */
 
-const SONIOX_WS = 'wss://stt-rt.soniox.com/transcribe-websocket';
+const DEEPGRAM_WS = 'wss://api.deepgram.com/v1/listen';
 
 export interface SttOptions {
   apiKey: string;
@@ -27,14 +27,30 @@ export class SttSession {
   private partialText = '';
   private silenceTimer?: ReturnType<typeof setTimeout>;
   private closed = false;
-
   private opts: SttOptions;
 
   constructor(opts: SttOptions) { this.opts = opts; }
 
   async open(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(SONIOX_WS);
+      const url = new URL(DEEPGRAM_WS);
+      url.searchParams.set('encoding', 'linear16');
+      url.searchParams.set('sample_rate', '16000');
+      url.searchParams.set('channels', '1');
+      url.searchParams.set('language', 'ru');
+      url.searchParams.set('model', 'nova-3');
+      url.searchParams.set('punctuate', 'true');
+      url.searchParams.set('smart_format', 'true');
+      url.searchParams.set('interim_results', 'true');
+      // Свой таймер тишины ниже подстраховывает, но пусть Deepgram
+      // тоже сигналит конец фразы через VAD.
+      url.searchParams.set('vad_events', 'true');
+      url.searchParams.set('utterance_end_ms', String(this.opts.silenceMs ?? 1200));
+      // Подсказки распознавания: имена, термины.
+      for (const kw of this.opts.hints ?? []) url.searchParams.append('keyterm', kw);
+
+      const ws = new WebSocket(url.toString(), ['token', this.opts.apiKey]);
+      ws.binaryType = 'arraybuffer';
       this.ws = ws;
 
       const failFast = setTimeout(() => {
@@ -42,25 +58,12 @@ export class SttSession {
         ws.close();
       }, 5000);
 
-      ws.onopen = () => {
-        clearTimeout(failFast);
-        ws.send(JSON.stringify({
-          api_key: this.opts.apiKey,
-          model: 'stt-rt-preview',
-          audio_format: 'pcm_s16le',
-          sample_rate: 16000,
-          num_channels: 1,
-          language_hints: ['ru', 'en'],
-          enable_endpoint_detection: true,
-          context: this.opts.hints?.join(', '),
-        }));
-        resolve();
-      };
+      ws.onopen = () => { clearTimeout(failFast); resolve(); };
 
       ws.onmessage = (ev) => this.handle(ev.data);
       ws.onerror = () => {
         clearTimeout(failFast);
-        this.opts.onError(new Error('STT: ошибка соединения'));
+        this.opts.onError(new Error('STT: ошибка соединения (проверьте ключ Deepgram)'));
       };
       ws.onclose = () => { if (!this.closed) this.flush(); };
     });
@@ -75,34 +78,41 @@ export class SttSession {
     let msg: any;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    if (msg.error_code) {
-      this.opts.onError(new Error(`STT: ${msg.error_message ?? msg.error_code}`));
+    if (msg.type === 'Error' || msg.error) {
+      this.opts.onError(new Error(`STT: ${msg.description ?? msg.message ?? 'ошибка Deepgram'}`));
       return;
     }
 
-    let partial = '';
-    for (const token of msg.tokens ?? []) {
-      if (token.is_final) this.finalText += token.text;
-      else partial += token.text;
+    if (msg.type === 'UtteranceEnd') { this.flush(); return; }
+
+    if (msg.type === 'Results') {
+      const alt = msg.channel?.alternatives?.[0];
+      const text = alt?.transcript ?? '';
+      if (!text) return;
+
+      if (msg.is_final) {
+        this.finalText += (this.finalText ? ' ' : '') + text;
+        this.partialText = '';
+      } else {
+        this.partialText = text;
+      }
+
+      const combined = (this.finalText + ' ' + this.partialText).trim();
+      if (combined) this.opts.onPartial?.(combined);
+
+      if (msg.speech_final) { this.flush(); return; }
+
+      // Подстраховка своим таймером — на случай сбоя VAD у провайдера.
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = setTimeout(() => this.flush(), (this.opts.silenceMs ?? 1200) + 500);
     }
-    this.partialText = partial;
-
-    const combined = (this.finalText + partial).trim();
-    if (combined) this.opts.onPartial?.(combined);
-
-    // Endpointing: провайдер сам сигналит конец фразы...
-    if (msg.finished || msg.is_endpoint) { this.flush(); return; }
-
-    // ...но подстраховываемся своим таймером тишины.
-    clearTimeout(this.silenceTimer);
-    this.silenceTimer = setTimeout(() => this.flush(), this.opts.silenceMs ?? 1200);
   }
 
   private flush() {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.silenceTimer);
-    const text = (this.finalText + this.partialText).trim();
+    const text = (this.finalText + ' ' + this.partialText).trim();
     this.close();
     if (text) this.opts.onFinal(text);
     else this.opts.onError(new Error('Ничего не расслышал'));

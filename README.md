@@ -8,7 +8,7 @@ G2 (микрофон + тачпад)
   ↓ BLE
 Even App → WebView с этим плагином
   ↓ WebSocket           ↓ HTTPS
-Soniox (распознавание)  LLM (ответ + вызов инструментов)
+Deepgram (распознавание) LLM (ответ + вызов инструментов)
   ↓
 HUD 576×288, монохром
 ```
@@ -37,7 +37,7 @@ HUD 576×288, монохром
 - Node.js 20 LTS или новее
 - Even Realities App с включённым Developer Mode
   (Even Hub → принудительно закрыть приложение → открыть заново → раздел разработчика справа вверху)
-- Ключ [Soniox](https://soniox.com) — распознавание речи
+- Ключ [Deepgram](https://console.deepgram.com/signup) — распознавание речи, $200 бесплатных кредитов без карты
 - Ключ Anthropic или OpenAI — ответы
 
 ## Установка
@@ -101,7 +101,7 @@ src/
   hud/renderer.ts        страницы, пагинация, стриминг
   hud/strings.ts         тексты ошибок
   state/machine.ts       автомат состояний с таймаутами
-  audio/stt.ts           Soniox WebSocket
+  audio/stt.ts           Deepgram WebSocket (Nova-3, русский)
   agent/llm.ts           адаптер Anthropic / OpenAI
   agent/registry.ts      контракт инструмента
   agent/router.ts        fast-path + цикл вызова инструментов
