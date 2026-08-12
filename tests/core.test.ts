@@ -873,3 +873,34 @@ test('ответ не уезжает сам: без действий стран�
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(bridge.calls.length, before, 'никакой таймер не должен листать за человека');
 });
+
+// ─── Миграция настроек ───────────────────────────────────────
+
+test('старые настройки с выключенным поиском обновляются один раз', async () => {
+  // РЕАЛЬНАЯ ЛОВУШКА: сохранённые значения перекрывают умолчания
+  // навсегда. Кто сохранился, пока поиск был выключен по умолчанию,
+  // остался без интернета — и это выглядело как «поисковик плохой».
+  const { loadConfig } = await import('../src/config.ts');
+
+  let stored = JSON.stringify({ sttKey: 'a', llmKey: 'b', webSearch: false });
+  const bridge = {
+    async get() { return stored; },
+    async set(_k: string, v: string) { stored = v; },
+  };
+
+  const cfg = await loadConfig(bridge as any);
+  assert.equal(cfg.webSearch, true, 'поиск должен включиться при обновлении');
+  assert.equal(JSON.parse(stored).version, 2, 'версия должна записаться');
+
+  // Осознанное выключение после миграции обязано сохраняться.
+  stored = JSON.stringify({ ...JSON.parse(stored), webSearch: false });
+  const again = await loadConfig(bridge as any);
+  assert.equal(again.webSearch, false, 'второй раз включать поиск нельзя');
+});
+
+test('инструкция требует конкретных поисковых запросов', async () => {
+  const { SYSTEM_PROMPT } = await import('../src/agent/router.ts');
+  const flat = SYSTEM_PROMPT.replace(/\s+/g, ' ');
+  assert.match(flat, /не придумывай цифру/i, 'запрет на выдуманные рейтинги');
+  assert.match(flat, /переформулируй/i, 'при плохой выдаче — искать заново');
+});
