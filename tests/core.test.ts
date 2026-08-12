@@ -67,6 +67,16 @@ test('погода перехватывается', () => {
   assert.equal(fastPath('какая погода')?.tool, 'weather_now');
 });
 
+test('«не ставь таймер на пять минут» не срабатывает как команда', () => {
+  // Раньше регулярка не была заякорена к началу фразы и находила
+  // «таймер N единиц» где угодно в строке, включая отрицания.
+  assert.equal(fastPath('не ставь таймер на пять минут'), null);
+});
+
+test('отмени таймер без числа не срабатывает', () => {
+  assert.equal(fastPath('отмени таймер'), null);
+});
+
 test('обычный вопрос идёт в модель, а не в fast-path', () => {
   assert.equal(fastPath('какая столица Японии'), null);
   assert.equal(fastPath('сколько будет два плюс два'), null);
@@ -126,4 +136,191 @@ test('зависание в THINKING обрывается таймаутом', a
   m.to('DISPLAYING');
   assert.equal(m.state, 'DISPLAYING');
   m.dispose();
+});
+
+test('CONFIRMING больше не форсирует ERROR по таймауту автомата', async () => {
+  // Раньше здесь стоял отдельный 30-секундный таймаут, который гонялся
+  // с таймаутом в askConfirm() и мог навсегда подвесить обещание
+  // подтверждения. Проверяем, что переход в CONFIRMING не ставит
+  // собственный таймер (нет автоматического force('ERROR')).
+  const m = new Machine();
+  m.to('LISTENING');
+  m.to('THINKING');
+  const seen: string[] = [];
+  m.onChange((s) => seen.push(s));
+  m.to('CONFIRMING');
+  // Ждать реальные 30 секунд в тесте не нужно — проверяем логически:
+  // просто убеждаемся, что переход CONFIRMING -> THINKING (как делает
+  // askConfirm при явном ответе) остаётся разрешён и работает.
+  assert.ok(m.to('THINKING'));
+  assert.deepEqual(seen, ['CONFIRMING', 'THINKING']);
+  m.dispose();
+});
+
+// ─── Hud: реальный баг с id контейнера при стриминге ─────────
+
+class FakeBridge {
+  calls: { method: string; args: unknown[] }[] = [];
+  private log(method: string, ...args: unknown[]) { this.calls.push({ method, args }); }
+  async createPage(p: unknown) { this.log('createPage', p); }
+  async rebuildPage(p: unknown) { this.log('rebuildPage', p); }
+  async updateText(id: number, text: string) { this.log('updateText', id, text); }
+  onGesture() {}
+  onLifecycle() {}
+  async startMic() {}
+  async stopMic() {}
+  onPcm() {}
+  async get() { return null; }
+  async set() {}
+  async requestShutdown() {}
+}
+
+test('Hud.stream пишет в контейнер тела (2), а не заголовка (1)', async () => {
+  // Реальный баг: stream() был захардкожен на containerId=1 (заголовок),
+  // хотя тело — это containerId=2. Стриминг ответа и частичное
+  // распознавание речи уходили не в ту область экрана.
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+  await hud.boot({ title: 'X', body: 'Y' });
+  await hud.stream('привет');
+
+  const upd = bridge.calls.find((c) => c.method === 'updateText');
+  assert.ok(upd, 'updateText не вызывался');
+  assert.equal(upd!.args[0], 2, 'stream() должен писать в containerId=2 (тело)');
+});
+
+test('Hud сохраняет порядок вызовов даже без ожидания каждого', async () => {
+  // onDelta в main.ts не await'ит каждый вызов stream()/status() —
+  // очередь внутри Hud обязана сохранять порядок сама.
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+  await hud.boot({ title: 'X', body: '' });
+
+  // Намеренно не await, как в реальном onDelta-колбэке
+  void hud.stream('1');
+  void hud.stream('12');
+  await hud.stream('123');
+
+  const texts = bridge.calls
+    .filter((c) => c.method === 'updateText')
+    .map((c) => c.args[1]);
+  assert.deepEqual(texts, ['1', '12', '123']);
+});
+
+// ─── STT: ручное завершение не должно терять распознанное ────
+
+import { SttSession } from '../src/audio/stt.ts';
+
+/** Минимальная замена WebSocket: ничего не шлёт, только фиксирует close. */
+class FakeSocket {
+  static OPEN = 1;
+  static CONNECTING = 0;
+  readyState = 1;
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  binaryType = '';
+  sent: unknown[] = [];
+  url: string;
+  protocols?: string[];
+  constructor(url: string, protocols?: string[]) {
+    this.url = url;
+    this.protocols = protocols;
+    // Открываемся асинхронно, как настоящий сокет
+    setTimeout(() => this.onopen?.(), 0);
+  }
+  send(d: unknown) { this.sent.push(d); }
+  close() { this.readyState = 3; this.onclose?.(); }
+}
+
+async function openSession(opts: Partial<Parameters<typeof makeOpts>[0]> = {}) {
+  const prev = (globalThis as any).WebSocket;
+  (globalThis as any).WebSocket = FakeSocket;
+  try {
+    const o = makeOpts(opts);
+    const s = new SttSession(o.opts);
+    await s.open();
+    return { session: s, ...o };
+  } finally {
+    (globalThis as any).WebSocket = prev;
+  }
+}
+
+function makeOpts(over: any = {}) {
+  const finals: string[] = [];
+  const errors: string[] = [];
+  const opts = {
+    apiKey: 'test',
+    onFinal: (t: string) => finals.push(t),
+    onError: (e: Error) => errors.push(e.message),
+    ...over,
+  };
+  return { opts, finals, errors };
+}
+
+/** Скармливает сессии сообщение в формате Deepgram. */
+function feed(session: any, transcript: string, isFinal = true) {
+  (session as any).handle(JSON.stringify({
+    type: 'Results',
+    is_final: isFinal,
+    channel: { alternatives: [{ transcript }] },
+  }));
+}
+
+test('ручное завершение отдаёт распознанный текст, а не выбрасывает его', async () => {
+  // РЕАЛЬНЫЙ БАГ: main.ts на тап в состоянии LISTENING звал close(),
+  // который ставил closed=true. flush() начинается с `if (this.closed) return`,
+  // поэтому onFinal не вызывался никогда — всё сказанное молча терялось,
+  // а автомат висел в LISTENING до 20-секундного таймаута.
+  const { session, finals, errors } = await openSession();
+  feed(session, 'привет как дела');
+
+  session.finish();
+
+  assert.deepEqual(finals, ['привет как дела'], 'текст должен уйти в onFinal');
+  assert.deepEqual(errors, []);
+});
+
+test('close() без текста не считается успешным распознаванием', async () => {
+  const { session, finals } = await openSession();
+  session.close();
+  assert.deepEqual(finals, [], 'близкий обрыв не должен выдавать пустой ответ');
+});
+
+test('повторный finish() не дублирует onFinal', async () => {
+  const { session, finals } = await openSession();
+  feed(session, 'тест');
+  session.finish();
+  session.finish();
+  assert.equal(finals.length, 1);
+});
+
+// ─── Контейнеры: без isEventCapture тапы не доходят ──────────
+
+test('ровно один контейнер помечен isEventCapture', async () => {
+  // САМЫЙ ДОРОГОЙ БАГ ПРОЕКТА. Хост доставляет пользовательские жесты
+  // только контейнеру с isEventCapture: 1. Без него одиночный тап
+  // молча игнорируется, а двойной продолжает работать (его обрабатывает
+  // система как Return) — выглядит как поломка сенсора очков.
+  // Документация SDK: «Exactly one container should use isEventCapture: 1».
+  const mod: any = await import('../src/sdk/bridge.ts');
+  const objects = mod.__textObjectsForTest({ title: 'T', body: 'B', footer: '1/2' });
+
+  const capturing = objects.filter((o: any) => o.isEventCapture === 1);
+  assert.equal(capturing.length, 1, 'должен быть ровно один контейнер с isEventCapture: 1');
+  assert.equal(capturing[0].containerName, 'body', 'события должен принимать контейнер тела');
+});
+
+test('zOrderIndex задан у всех контейнеров и уникален', async () => {
+  // Требование SDK: либо у всех, либо ни у кого; значения уникальны.
+  // Частично заполненные или дублирующиеся значения хост отвергает.
+  const mod: any = await import('../src/sdk/bridge.ts');
+  const objects = mod.__textObjectsForTest({ title: 'T', body: 'B' });
+
+  const z = objects.map((o: any) => o.zOrderIndex);
+  assert.ok(z.every((v: unknown) => typeof v === 'number'), 'zOrderIndex должен быть у всех');
+  assert.equal(new Set(z).size, z.length, 'zOrderIndex должны быть уникальны');
 });

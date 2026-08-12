@@ -1,4 +1,4 @@
-import { getBridge, lastBackend, type Bridge, type Gesture } from './sdk/bridge.ts';
+import { getBridge, type Bridge, type Gesture } from './sdk/bridge.ts';
 import { Hud } from './hud/renderer.ts';
 import { Machine } from './state/machine.ts';
 import { SttSession } from './audio/stt.ts';
@@ -30,14 +30,9 @@ async function main() {
 
   // Без ключей смысла запускаться нет — но и чёрного экрана быть не должно.
   if (!cfg.sttKey || !cfg.llmKey) {
-    // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем тип моста и сырое значение из
-    // хранилища, чтобы понять, почему настройки не долетают. Убрать
-    // после того, как разберёмся.
-    const raw = await bridge.get('cfg');
-    const debug = `мост: ${lastBackend ?? '?'}\nсырое cfg: ${raw ? raw.slice(0, 80) : 'null'}`;
     await hud.boot({
       title: 'SERGEY AI',
-      body: `Откройте настройки на телефоне и введите ключи API.\n\n${debug}`,
+      body: 'Откройте настройки на телефоне и введите ключи API.',
     });
     return;
   }
@@ -65,14 +60,6 @@ async function main() {
 // ─────────────────────────────────────────────────────────────
 
 async function onGesture(g: Gesture) {
-  // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем каждый распознанный жест как есть
-  // и НЕ выполняем обычную логику — иначе двойной тап тут же откроет
-  // системный диалог выхода и перекроет текст раньше, чем его прочитают.
-  if ((window as any).__DEBUG_GESTURES__ !== false) {
-    await hud.status('ЖЕСТ', `type: ${g.type}\nsource: ${g.source}`);
-    return;
-  }
-
   // Двойной тап на корневом экране обязан отдавать управление системе.
   // Свой диалог выхода здесь не проходит ревью и ломает запуск других
   // приложений без перезагрузки очков.
@@ -88,11 +75,21 @@ async function onGesture(g: Gesture) {
     return;
   }
 
+  // Вне корневого экрана двойной тап — это «назад», как и во всей системе
+  // Even (Gesture customization: Double tap = Return). Без этой ветки он
+  // просто проваливался в switch и не делал ничего: из показанного ответа
+  // или из зависшего «ДУМАЮ» нельзя было выйти ничем, кроме таймаута.
+  if (g.type === 'double_click') {
+    cancel();
+    return;
+  }
+
   switch (g.type) {
     case 'click':
       if (fsm.state === 'IDLE' || fsm.state === 'DISPLAYING') await startListening();
-      else if (fsm.state === 'LISTENING') stt?.close();      // ручное завершение
-      else if (fsm.state === 'THINKING') cancel();            // прервать
+      else if (fsm.state === 'LISTENING') stt?.finish();       // ручное завершение
+      else if (fsm.state === 'THINKING') cancel();             // прервать
+      else if (fsm.state === 'ERROR') fsm.force('IDLE');       // «Тап — повторить»
       break;
 
     case 'scroll_up':
@@ -114,12 +111,27 @@ function onLifecycle(e: string) {
   }
 }
 
+let errorExitTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function onStateChange(s: string) {
+  // Любой уход из ERROR снимает отложенный автовыход. Без этого таймер
+  // доживал до конца и звал force('IDLE') уже поверх нового состояния:
+  // тап сразу после ошибки начинал запись, а через пару секунд
+  // просроченный таймер молча её обрывал.
+  if (s !== 'ERROR' && errorExitTimer) {
+    clearTimeout(errorExitTimer);
+    errorExitTimer = null;
+  }
+
   if (s === 'ERROR') {
     await hud.status(ERR.generic.title, ERR.generic.body);
     stt?.close();
     await bridge.stopMic().catch(() => {});
-    setTimeout(() => fsm.force('IDLE'), 2500);
+    if (errorExitTimer) clearTimeout(errorExitTimer);
+    errorExitTimer = setTimeout(() => {
+      errorExitTimer = null;
+      fsm.force('IDLE');
+    }, 2500);
   }
   if (s === 'IDLE') {
     await hud.status('SERGEY AI', 'Тап — говорить');
@@ -218,7 +230,7 @@ function classify(e: any) {
   const m = String(e?.message ?? '');
   if (!navigator.onLine || /fetch|network|Failed to fetch/i.test(m)) return ERR.network;
   if (/401|403|api.?key/i.test(m)) return ERR.auth;
-  if (/STT|Soniox/i.test(m)) return ERR.stt;
+  if (/STT|Deepgram/i.test(m)) return ERR.stt;
   if (/LLM|429|5\d\d/.test(m)) return ERR.llm;
   return ERR.generic;
 }

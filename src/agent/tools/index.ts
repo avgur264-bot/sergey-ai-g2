@@ -105,8 +105,9 @@ export const weatherTool: ToolSpec = {
   async run(args, ctx) {
     // ⚠️ Геолокация в WebView работает только на .ehpk-сборке.
     //    Через QR-сайдлоад вернётся PERMISSION_DENIED — это не баг.
-    const { lat, lon } = args.lat && args.lon
-      ? args
+    const hasCoords = typeof args.lat === 'number' && typeof args.lon === 'number';
+    const { lat, lon } = hasCoords
+      ? args as { lat: number; lon: number }
       : await getCoords();
 
     const url = `https://api.open-meteo.com/v1/forecast`
@@ -143,13 +144,19 @@ function getCoords(): Promise<{ lat: number; lon: number }> {
 export { searchTool, telegramTool, noteAddTool, noteListTool } from './direct.ts';
 export { calendarListTool, calendarCreateTool } from './calendar.ts';
 
-import { searchTool, telegramTool, noteAddTool, noteListTool } from './direct.ts';
-import { calendarListTool, calendarCreateTool } from './calendar.ts';
+import { noteAddTool, noteListTool } from './direct.ts';
 
 /**
  * Каждый инструмент здесь — это входные токены в КАЖДОМ запросе.
- * Список держим коротким: десять штук ≈ 700 токенов, что при кэшировании
- * промпта стоит копейки, но при отключённом кэше уже заметно.
+ * Список держим коротким и рабочим «из коробки».
+ *
+ * web_search, send_message, calendar_list/create НЕ включены: им нужны
+ * ctx.cfg.searchKey / tgToken / tgChatId / proxyUrl — полей для них пока
+ * нет на странице настроек (см. README «Прокси»). Включать их в список
+ * инструментов модели раньше, чем они реально смогут отработать, —
+ * значит платить токенами за каждый запрос и рисковать, что модель
+ * попробует вызвать заведомо нерабочий инструмент вместо прямого ответа.
+ * Добавить обратно в defaultTools после того, как заведёте прокси.
  */
 export const defaultTools = [
   timerTool,
@@ -158,8 +165,4 @@ export const defaultTools = [
   weatherTool,
   noteAddTool,
   noteListTool,
-  searchTool,
-  telegramTool,
-  calendarListTool,
-  calendarCreateTool,
 ];

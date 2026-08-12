@@ -1,4 +1,5 @@
 import type { Bridge } from '../sdk/bridge.ts';
+import { BODY_CONTAINER } from '../sdk/bridge.ts';
 
 export interface HudPage {
   title: string;
@@ -53,20 +54,36 @@ export class Hud {
 
   private bridge: Bridge;
 
+  // Все операции с экраном идут строго по очереди. Колбэк onDelta в
+  // main.ts не дожидается каждого вызова перед следующим (иначе стриминг
+  // токенов подвисал бы на каждой сетевой round-trip к очкам), поэтому
+  // без такой очереди быстрые токены могли бы прийти на нативную сторону
+  // не в том порядке, в котором сгенерированы.
+  private queue: Promise<void> = Promise.resolve();
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(() => {}, () => {});
+    return run;
+  }
+
   constructor(bridge: Bridge) { this.bridge = bridge; }
 
   /** Первый экран приложения. Вызывается один раз при старте. */
   async boot(page: HudPage) {
-    await this.bridge.createPage(page);
     this.created = true;
+    return this.enqueue(() => this.bridge.createPage(page));
   }
 
   /** Полная замена экрана. Даёт вспышку — не использовать для стриминга. */
   async show(page: HudPage) {
     this.pages = [];
     this.title = page.title;
-    if (!this.created) return this.boot(page);
-    await this.bridge.rebuildPage(page);
+    const wasCreated = this.created;
+    this.created = true;
+    return this.enqueue(async () => {
+      if (!wasCreated) await this.bridge.createPage(page);
+      else await this.bridge.rebuildPage(page);
+    });
   }
 
   /** Короткий статус: СЛУШАЮ / ДУМАЮ / КАЛЕНДАРЬ… */
@@ -76,7 +93,7 @@ export class Hud {
 
   /** Стриминг ответа. Обновляет только тело, без мигания. */
   async stream(chunk: string) {
-    await this.bridge.updateText(1, chunk);
+    return this.enqueue(() => this.bridge.updateText(BODY_CONTAINER, chunk));
   }
 
   /** Финальный многостраничный ответ. */
@@ -101,7 +118,9 @@ export class Hud {
   private async render() {
     const footer = this.isMultiPage ? `${this.index + 1}/${this.pages.length}` : '';
     const page = { title: this.title, body: this.pages[this.index] ?? '', footer };
-    if (!this.created) { await this.bridge.createPage(page); this.created = true; return; }
-    await this.bridge.rebuildPage(page);
+    return this.enqueue(async () => {
+      if (!this.created) { await this.bridge.createPage(page); this.created = true; return; }
+      await this.bridge.rebuildPage(page);
+    });
   }
 }

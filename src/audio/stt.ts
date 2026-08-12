@@ -63,7 +63,9 @@ export class SttSession {
       ws.onmessage = (ev) => this.handle(ev.data);
       ws.onerror = () => {
         clearTimeout(failFast);
-        this.opts.onError(new Error('STT: ошибка соединения (проверьте ключ Deepgram)'));
+        const err = new Error('STT: ошибка соединения (проверьте ключ Deepgram)');
+        this.opts.onError(err);
+        reject(err);
       };
       ws.onclose = () => { if (!this.closed) this.flush(); };
     });
@@ -108,20 +110,40 @@ export class SttSession {
     }
   }
 
+  /**
+   * Штатное завершение по команде пользователя: отдаёт всё, что успели
+   * распознать, через onFinal.
+   *
+   * Раньше для этого звали close(), и это молча теряло весь текст:
+   * close() ставит closed = true, а flush() начинается с проверки
+   * `if (this.closed) return`. В итоге onFinal не вызывался никогда,
+   * автомат оставался в LISTENING до 20-секундного таймаута и уходил
+   * в ошибку — при том что человек всё сказал правильно.
+   */
+  finish() {
+    this.flush();
+  }
+
   private flush() {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.silenceTimer);
     const text = (this.finalText + ' ' + this.partialText).trim();
-    this.close();
+    this.closeSocket();
     if (text) this.opts.onFinal(text);
     else this.opts.onError(new Error('Ничего не расслышал'));
   }
 
-  close() {
+  /** Рвёт соединение, не трогая накопленный текст. */
+  private closeSocket() {
     clearTimeout(this.silenceTimer);
-    this.closed = true;
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) this.ws.close();
     this.ws = undefined;
+  }
+
+  /** Аварийный обрыв: закрываем сокет и НЕ отдаём текст. */
+  close() {
+    this.closed = true;
+    this.closeSocket();
   }
 }

@@ -42,6 +42,13 @@ const MAX_UPGRADE = 2000;
 
 export const BODY_CONTAINER = C_BODY;
 
+/**
+ * Только для тестов: даёт заглянуть в готовые контейнеры без очков.
+ * Проверяем на них требования хоста (isEventCapture, zOrderIndex),
+ * нарушение которых иначе всплывает лишь на живом устройстве.
+ */
+export const __textObjectsForTest = (page: HudPage) => textObjects(page);
+
 // ─────────────────────────────────────────────────────────────
 
 export type GestureSource = 'right' | 'left' | 'ring' | 'unknown';
@@ -96,6 +103,18 @@ function textObjects(page: HudPage): TextContainerProperty[] {
       xPosition: PAD, yPosition: 62,
       width: SCREEN_W - PAD * 2, height: hasFooter ? 170 : 200,
       zOrderIndex: 1,
+      // ⚠️ БЕЗ ЭТОГО ФЛАГА ОДИНОЧНЫЙ ТАП НЕ ПРИХОДИТ ВООБЩЕ.
+      // Хост доставляет пользовательские жесты только контейнеру,
+      // помеченному isEventCapture: 1 — «input is only effective when the
+      // app has an active event container; if nothing is listening, the
+      // action is silently ignored». Ровно один контейнер на странице
+      // должен нести этот флаг.
+      //
+      // Симптом при отсутствии флага коварный: двойной тап продолжает
+      // работать (его перехватывает система как Return и показывает свой
+      // диалог выхода), а одиночный молча пропадает. Легко принять за
+      // поломку сенсора — это не она.
+      isEventCapture: 1,
       content: clamp(page.body, MAX_CREATE),
     }),
     new TextContainerProperty({
@@ -293,7 +312,6 @@ class MockBridge implements Bridge {
 // ─────────────────────────────────────────────────────────────
 
 let instance: Bridge | null = null;
-export let lastBackend: 'native' | 'mock' | null = null;
 
 export async function getBridge(): Promise<Bridge> {
   if (instance) return instance;
@@ -315,18 +333,15 @@ export async function getBridge(): Promise<Bridge> {
 
   if (!hasNativeHost) {
     console.warn('[bridge] flutter_inappwebview не найден — работаю в моке для браузера');
-    lastBackend = 'mock';
     instance = new MockBridge();
     return instance;
   }
 
   try {
     const sdk = await waitForEvenAppBridge();
-    lastBackend = 'native';
     instance = new SdkBridge(sdk);
   } catch (e) {
     console.warn('[bridge] нативный хост есть, но SDK не инициализировался:', e);
-    lastBackend = 'mock';
     instance = new MockBridge();
   }
   return instance;

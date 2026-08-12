@@ -1,4 +1,4 @@
-import { getBridge, lastBackend } from '../sdk/bridge.ts';
+import { getBridge } from '../sdk/bridge.ts';
 import { loadConfig, saveConfig, type Config } from '../config.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -57,11 +57,7 @@ async function init() {
     await saveConfig(bridge, next);
     render(next as Config);
 
-    // ВРЕМЕННАЯ ДИАГНОСТИКА
-    const readBack = await bridge.get('cfg');
-    savedEl.textContent =
-      `Сохранено (мост: ${lastBackend}). Перечитано: ${readBack ? readBack.slice(0, 60) : 'null'}. ` +
-      `Перезапустите приложение на очках.`;
+    savedEl.textContent = 'Сохранено. Перезапустите приложение на очках.';
     setTimeout(() => { savedEl.textContent = ''; }, 4000);
   });
 }

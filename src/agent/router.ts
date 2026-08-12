@@ -36,8 +36,11 @@ const WORD_NUM: Record<string, number> = {
 export function fastPath(text: string): FastMatch | null {
   const t = text.toLowerCase().trim();
 
-  // «таймер десять минут», «поставь таймер на 5 минут»
-  const timer = t.match(/таймер\s*(?:на\s*)?([\wа-я]+)\s*([а-я]+)/i);
+  // «таймер десять минут», «поставь таймер на 5 минут».
+  // Заякорено к началу фразы с узким списком лид-слов — иначе, например,
+  // «не ставь таймер на пять минут» тоже срабатывал бы (регулярка находит
+  // «таймер N единиц» где угодно в строке, не только в начале).
+  const timer = t.match(/^(?:поставь|запусти|включи|установи)?\s*таймер\s*(?:на\s*)?([\wа-я]+)\s*([а-я]+)/i);
   if (timer) {
     const n = Number(timer[1]) || WORD_NUM[timer[1]];
     const unit = Object.keys(UNITS).find((u) => timer[2].startsWith(u.slice(0, 3)));
@@ -107,8 +110,15 @@ export class Router {
         cb.onTool(spec.label);
         const ok = await this.confirmIfNeeded(spec, fast.args, cb);
         if (!ok) return { text: 'ОТМЕНЕНО', instant: true };
-        const r = await this.exec(spec, fast.args, signal);
-        if (r.direct) return { text: r.direct, instant: true };
+        try {
+          const r = await this.exec(spec, fast.args, signal);
+          if (r.direct) return { text: r.direct, instant: true };
+        } catch (e: any) {
+          // Не роняем весь ход из-за сбоя быстрой команды (например,
+          // погода без геолокации) — тихо уходим на обычный путь через
+          // модель, как и при сбое инструмента в обычном цикле.
+          console.warn('[router] fast-path сбой, ухожу на обычный путь:', e);
+        }
       }
     }
 
@@ -190,10 +200,12 @@ export class Router {
   private async exec(spec: ToolSpec, args: any, signal: AbortSignal) {
     const ctx: ToolContext = { bridge: this.bridge, cfg: this.cfg, signal };
     // Один ретрай на сетевых инструментах — реконнект WebView штатное дело.
+    // Но не повторяем, если операцию уже отменили — второй вызов всё
+    // равно немедленно провалится с тем же AbortError.
     try {
       return await spec.run(args, ctx);
     } catch (e) {
-      if (spec.transport === 'local') throw e;
+      if (spec.transport === 'local' || signal.aborted) throw e;
       return await spec.run(args, ctx);
     }
   }
