@@ -14,6 +14,7 @@ const fields = {
   city: $<HTMLInputElement>('city'),
   wakeEnabled: $<HTMLInputElement>('wakeEnabled'),
   wakeWord: $<HTMLInputElement>('wakeWord'),
+  searchKey: $<HTMLInputElement>('searchKey'),
 };
 
 const statusEl = $('status');
@@ -38,6 +39,7 @@ async function init() {
   fields.city.value = cfg.city;
   fields.wakeEnabled.checked = cfg.wakeEnabled;
   fields.wakeWord.value = cfg.wakeWord;
+  fields.searchKey.value = cfg.searchKey;
 
   render(cfg);
 
@@ -75,6 +77,7 @@ async function init() {
       city: fields.city.value.trim(),
       wakeEnabled: fields.wakeEnabled.checked,
       wakeWord: fields.wakeWord.value.trim() || 'сергей',
+      searchKey: fields.searchKey.value.trim(),
     };
 
     try {

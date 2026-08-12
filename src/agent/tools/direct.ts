@@ -5,47 +5,74 @@ import type { ToolSpec } from '../registry.ts';
 // для HUD это важнее, чем полнота выдачи.
 
 export const searchTool: ToolSpec = {
-  name: 'web_search',
+  name: 'web_search_deep',
   description:
-    'Найти актуальную информацию в интернете: новости, курсы, факты после обучения модели.',
+    'Глубокий поиск с извлечением текста страниц. Возвращает готовую '
+    + 'выжимку и содержимое источников, а не только заголовки. Используй '
+    + 'для рейтингов, отзывов, цен, расписаний и всего, что нужно '
+    + 'проверить по существу. Для свежих данных ставь days.',
   kind: 'read',
   transport: 'direct',
   label: 'ИЩУ',
   schema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Поисковый запрос' },
+      query: {
+        type: 'string',
+        description: 'Запрос как в поисковой строке, с городом и годом',
+      },
+      days: {
+        type: 'number',
+        description: 'Ограничить свежестью: за сколько последних дней искать',
+      },
     },
     required: ['query'],
   },
   async run(args, ctx) {
     const key = ctx.cfg.searchKey;
-    if (!key) return { data: 'Ключ поиска не настроен', direct: 'ПОИСК НЕ НАСТРОЕН' };
+    if (!key) return { data: 'Ключ глубокого поиска не настроен' };
+
+    const body: Record<string, unknown> = {
+      query: String(args.query),
+      // Глубокий режим извлекает текст страниц, а не сниппеты: именно
+      // на сниппетах модель и додумывает то, чего в источнике нет.
+      search_depth: 'advanced',
+      include_answer: 'advanced',
+      max_results: 5,
+    };
+
+    // Свежесть просим только когда она нужна: ограничение по дате
+    // отсекает справочные страницы, которые давно не обновлялись.
+    const days = Number(args.days);
+    if (Number.isFinite(days) && days > 0) body.days = Math.min(days, 365);
 
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       signal: ctx.signal,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        api_key: key,
-        query: String(args.query),
-        search_depth: 'basic',
-        include_answer: true,
-        max_results: 3,
-      }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
     });
 
+    if (res.status === 401) throw new Error('401: ключ поиска не принят');
     if (!res.ok) throw new Error(`Поиск: ${res.status}`);
     const d = await res.json();
 
-    // Модели отдаём выжимку и заголовки — не полные тексты страниц,
-    // иначе входные токены улетят в разы.
-    const brief = [
-      d.answer ?? '',
-      ...(d.results ?? []).slice(0, 3).map((r: any) => `${r.title}: ${r.content?.slice(0, 200)}`),
-    ].filter(Boolean).join('\n');
+    // Модели отдаём выжимку и извлечённый текст источников с датами —
+    // по датам она отличит актуальное от прошлогоднего.
+    const parts: string[] = [];
+    if (d.answer) parts.push(`Кратко: ${d.answer}`);
 
-    return { data: brief.slice(0, 1500) || 'Ничего не нашлось' };
+    for (const r of (d.results ?? []).slice(0, 5)) {
+      const when = r.published_date ? ` (${String(r.published_date).slice(0, 10)})` : '';
+      const text = String(r.content ?? '').slice(0, 400);
+      parts.push(`${r.title}${when}: ${text}`);
+    }
+
+    const brief = parts.join('\n').slice(0, 3000);
+    return { data: brief || 'по этому запросу ничего не нашлось' };
   },
 };
 

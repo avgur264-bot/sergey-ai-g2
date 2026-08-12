@@ -935,3 +935,28 @@ test('в инструкцию подставляется сегодняшняя 
   assert.match(p, /Сегодня 12 августа 2026/, 'дата должна стоять первой строкой');
   assert.match(p.replace(/\s+/g, ' '), /текущий год/i, 'правило про свежесть на месте');
 });
+
+// ─── Русскоязычный поиск ─────────────────────────────────────
+
+test('инструкция велит искать по местным источникам для стран СНГ', async () => {
+  const { SYSTEM_PROMPT } = await import('../src/agent/router.ts');
+  const flat = SYSTEM_PROMPT.replace(/\s+/g, ' ');
+  assert.match(flat, /2ГИС/, 'местные справочники должны быть названы');
+  assert.match(flat, /по-русски/, 'язык запроса должен быть задан явно');
+});
+
+test('глубокий поиск подключается только при наличии ключа', async () => {
+  const { searchTool } = await import('../src/agent/tools/index.ts');
+  const { Registry } = await import('../src/agent/registry.ts');
+
+  // Без ключа инструмент не должен молча делать вид, что работает.
+  const r = await searchTool.run(
+    { query: 'тест' },
+    { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
+  );
+  assert.match(r.data, /не настроен/, 'без ключа честно сообщает об этом');
+
+  // И его вообще не должно быть в реестре без ключа.
+  const reg = new Registry();
+  assert.equal(reg.get('web_search_deep'), undefined);
+});

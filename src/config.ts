@@ -29,6 +29,12 @@ export interface Config {
   wakeEnabled: boolean;
   /** Слово-обращение, после которого идёт вопрос. */
   wakeWord: string;
+  /**
+   * Ключ Tavily — глубокого поиска с извлечением текста страниц.
+   * 1000 запросов в месяц бесплатно, карта не нужна. Без ключа
+   * работает только встроенный поиск провайдера.
+   */
+  searchKey: string;
   /** Версия набора настроек — см. CONFIG_VERSION ниже. */
   version?: number;
 }
@@ -44,6 +50,7 @@ const DEFAULTS: Config = {
   city: '',
   wakeEnabled: false,
   wakeWord: 'сергей',
+  searchKey: '',
   version: 3,
 };
 

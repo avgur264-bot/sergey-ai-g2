@@ -4,7 +4,7 @@ import { Machine } from './state/machine.ts';
 import { SttSession } from './audio/stt.ts';
 import { AnthropicLlm, OpenAiLlm, type Llm } from './agent/llm.ts';
 import { Registry } from './agent/registry.ts';
-import { defaultTools } from './agent/tools/index.ts';
+import { defaultTools, searchTool } from './agent/tools/index.ts';
 import { Router } from './agent/router.ts';
 import { ERR, BRAND } from './hud/strings.ts';
 import { endsWithQuestion, isFarewell } from './agent/dialog.ts';
@@ -93,7 +93,14 @@ function buildRouter(): Router {
   const llm: Llm = cfg.provider === 'openai'
     ? new OpenAiLlm(cfg.llmKey, cfg.model, cfg.baseUrl)
     : new AnthropicLlm(cfg.llmKey, cfg.model, cfg.baseUrl);
+
   const registry = new Registry().add(...defaultTools);
+
+  // Глубокий поиск подключаем только когда есть ключ. Инструмент без
+  // ключа — это лишние токены в каждом запросе и риск, что модель
+  // вызовет заведомо нерабочее вместо того, чтобы просто ответить.
+  if (cfg.searchKey) registry.add(searchTool);
+
   return new Router(llm, registry, bridge, cfg as any);
 }
 
