@@ -113,6 +113,33 @@ function onLifecycle(e: string) {
 
 let errorExitTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Причина текущей ошибки. Раньше её показывали в catch, а следующей же
+ * строкой звали force('ERROR') — и обработчик состояния немедленно
+ * затирал точное сообщение общим «ОШИБКА». Диагностика уничтожалась
+ * ровно в тот момент, когда она нужнее всего.
+ */
+let pendingError: { title: string; body: string } | null = null;
+
+/** Показать конкретную ошибку и уйти в состояние ERROR, не потеряв текст. */
+function failWith(kind: { title: string; body: string }, cause?: unknown) {
+  // Короткий технический хвост помогает понять, что именно сломалось:
+  // «МОДЕЛЬ НЕДОСТУПНА» без кода ответа не отличить от «нет сети».
+  const detail = shortReason(cause);
+  pendingError = {
+    title: kind.title,
+    body: detail ? `${kind.body}\n${detail}` : kind.body,
+  };
+  fsm.force('ERROR');
+}
+
+/** Первая строка причины, обрезанная до читаемого на HUD размера. */
+function shortReason(e: unknown): string {
+  const m = String((e as any)?.message ?? '').split('\n')[0].trim();
+  if (!m) return '';
+  return m.length > 90 ? m.slice(0, 89) + '…' : m;
+}
+
 async function onStateChange(s: string) {
   // Любой уход из ERROR снимает отложенный автовыход. Без этого таймер
   // доживал до конца и звал force('IDLE') уже поверх нового состояния:
@@ -124,14 +151,18 @@ async function onStateChange(s: string) {
   }
 
   if (s === 'ERROR') {
-    await hud.status(ERR.generic.title, ERR.generic.body);
+    const screen = pendingError ?? ERR.generic;
+    pendingError = null;
+    await hud.status(screen.title, screen.body);
     stt?.close();
     await bridge.stopMic().catch(() => {});
     if (errorExitTimer) clearTimeout(errorExitTimer);
+    // Ошибку с подробностями держим на экране дольше — её надо успеть
+    // прочитать, а не поймать взглядом за две секунды.
     errorExitTimer = setTimeout(() => {
       errorExitTimer = null;
       fsm.force('IDLE');
-    }, 2500);
+    }, 8000);
   }
   if (s === 'IDLE') {
     await hud.status('SERGEY AI', 'Тап — говорить');
@@ -151,7 +182,7 @@ async function startListening() {
     hints: cfg.hints,
     onPartial: (t) => { hud.stream(t).catch(() => {}); },
     onFinal: (t) => { void think(t); },
-    onError: (e) => { console.error(e); fsm.force('ERROR'); },
+    onError: (e) => { console.error(e); failWith(classify(e), e); },
   });
 
   try {
@@ -160,8 +191,10 @@ async function startListening() {
     await bridge.startMic();
   } catch (e) {
     console.error(e);
-    await hud.status(ERR.mic.title, ERR.mic.body);
-    fsm.force('ERROR');
+    // Сюда попадает и сбой открытия сокета распознавания, и отказ
+    // микрофона — их надо различать, поэтому классифицируем, а не
+    // показываем всегда «нет микрофона».
+    failWith(classify(e), e);
   }
 }
 
@@ -192,9 +225,7 @@ async function think(question: string) {
   } catch (e: any) {
     if (e?.name === 'AbortError') { fsm.force('IDLE'); return; }
     console.error(e);
-    const kind = classify(e);
-    await hud.status(kind.title, kind.body);
-    fsm.force('ERROR');
+    failWith(classify(e), e);
   } finally {
     abort = null;
   }
@@ -228,8 +259,11 @@ function cancel() {
 
 function classify(e: any) {
   const m = String(e?.message ?? '');
+  // Порядок важен: 401 из Deepgram — это «ключ не принят», а не «не слышу»,
+  // поэтому проверка авторизации идёт раньше проверки на STT.
+  if (/audio|microphone|микрофон|NotAllowedError/i.test(m)) return ERR.mic;
+  if (/401|403|api.?key|unauthor/i.test(m)) return ERR.auth;
   if (!navigator.onLine || /fetch|network|Failed to fetch/i.test(m)) return ERR.network;
-  if (/401|403|api.?key/i.test(m)) return ERR.auth;
   if (/STT|Deepgram/i.test(m)) return ERR.stt;
   if (/LLM|429|5\d\d/.test(m)) return ERR.llm;
   return ERR.generic;
