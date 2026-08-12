@@ -14,7 +14,19 @@
       --alert: #a8341f;
     }
     * { box-sizing: border-box; }
+    /* WebView внутри Even App (Flutter InAppWebView) иногда перехватывает
+       вертикальный жест, и страница перестаёт скроллиться, хотя контент
+       выше экрана. Явные overflow + высота + touch-action возвращают
+       прокрутку самой странице. */
+    html {
+      height: 100%;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     body {
+      min-height: 100%;
+      overflow-y: auto;
+      touch-action: pan-y;
       margin: 0; padding: 28px 20px 64px;
       background: var(--paper); color: var(--ink);
       font: 400 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -59,12 +71,22 @@
     }
     textarea { resize: vertical; min-height: 68px; }
 
+    /* Кнопка всегда на экране: приколота к низу и не зависит от того,
+       работает ли прокрутка в этом WebView. */
     button {
-      margin-top: 26px; width: 100%; padding: 14px;
+      position: fixed;
+      left: 20px; right: 20px; bottom: 16px;
+      max-width: 520px; margin: 0 auto;
+      width: auto; padding: 14px;
       border: 0; border-radius: 6px;
       background: var(--ink); color: var(--paper);
       font: 500 15px/1 inherit; letter-spacing: .01em;
+      box-shadow: 0 -6px 16px rgba(0,0,0,.12);
+      z-index: 10;
     }
+    /* Контенту нужен запас снизу, чтобы последнее поле не пряталось
+       под приколотой кнопкой. */
+    main { padding-bottom: 96px; }
     button:active { transform: translateY(1px); }
     button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
