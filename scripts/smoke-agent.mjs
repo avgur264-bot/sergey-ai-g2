@@ -5,28 +5,37 @@ import assert from 'node:assert/strict';
 const mod = await import(process.env.BUNDLE ? '../worker/agent.bundle.js' : '../worker/agent.ts');
 const worker = mod.default;
 
-const env = { AGENT_TOKEN: 'secret', ANTHROPIC_API_KEY: 'sk-ant-test', CITY: 'Алматы' };
+// Секретов у воркера больше нет: ключ приходит от очков в поле Token.
+const env = { CITY: 'Алматы' };
 
-const post = (body, token = 'secret') => new Request('https://agent.test/', {
+const post = (body, token = 'sk-ant-test') => new Request('https://agent.test/', {
   method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
   body: JSON.stringify(body),
 });
 
-// 1. Чужой токен внутрь не пускаем, но объясняем это человеку словами:
-// код ошибки очки покажут как безликое «network error».
+// 1. Не тот токен — объясняем словами: код ошибки очки покажут как
+// безликое «network error», и человек останется без подсказки.
 {
-  const res = await worker.fetch(post({ messages: [] }, 'wrong'), env);
+  const res = await worker.fetch(post({ messages: [] }, 'not-an-anthropic-key'), env);
   const d = await res.json();
   assert.equal(res.status, 200, 'ответ должен доходить до экрана');
-  assert.match(d.choices[0].message.content, /Токен не совпадает/);
+  assert.match(d.choices[0].message.content, /sk-ant-/);
 }
 
-// 1a. Незаполненные настройки тоже видны на экране, а не молчат.
+// 1a. Ключ из поля Token уходит в модель, а не хранится в воркере.
 {
-  const res = await worker.fetch(post({ messages: [] }), { AGENT_TOKEN: 'secret' });
-  const d = await res.json();
-  assert.match(d.choices[0].message.content, /ANTHROPIC_API_KEY/);
+  const prev = globalThis.fetch;
+  let sentKey = null;
+  globalThis.fetch = async (_u, init) => {
+    sentKey = init.headers['x-api-key'];
+    return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'ок' }] }) };
+  };
+  try {
+    await worker.fetch(post({ messages: [{ role: 'user', content: 'тест' }] },
+      'sk-ant-key-from-glasses'), env);
+    assert.equal(sentKey, 'sk-ant-key-from-glasses', 'ключ берётся из запроса очков');
+  } finally { globalThis.fetch = prev; }
 }
 
 // 2. Обычный вопрос — ответ в форме OpenAI.

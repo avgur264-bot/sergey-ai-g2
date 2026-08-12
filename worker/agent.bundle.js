@@ -93,29 +93,28 @@ var MODEL_DEFAULT = "claude-sonnet-5";
 var agent_default = {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
+    if (req.method === "GET") {
+      return json({ ok: true, agent: "sergey-ai", hint: "POST /v1/chat/completions" });
+    }
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-    if (!env.ANTHROPIC_API_KEY) {
-      return chatReply("\u041D\u0435 \u0437\u0430\u0434\u0430\u043D ANTHROPIC_API_KEY \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u0432\u043E\u0440\u043A\u0435\u0440\u0430.");
-    }
-    if (!env.AGENT_TOKEN) {
-      return chatReply("\u041D\u0435 \u0437\u0430\u0434\u0430\u043D AGENT_TOKEN \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u0432\u043E\u0440\u043A\u0435\u0440\u0430.");
-    }
     const auth = req.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.AGENT_TOKEN}`) {
-      return chatReply("\u0422\u043E\u043A\u0435\u043D \u043D\u0435 \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u0435\u0442 \u0441 AGENT_TOKEN \u0432\u043E\u0440\u043A\u0435\u0440\u0430.");
+    const apiKey = auth.replace(/^Bearer\s+/i, "").trim();
+    if (!apiKey.startsWith("sk-ant-")) {
+      return chatReply(
+        "\u0412 \u043F\u043E\u043B\u0435 Token \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043D\u0443\u0436\u043D\u043E \u0432\u043F\u0438\u0441\u0430\u0442\u044C \u043A\u043B\u044E\u0447 Anthropic, \u043D\u0430\u0447\u0438\u043D\u0430\u044E\u0449\u0438\u0439\u0441\u044F \u0441 sk-ant-."
+      );
     }
     let body;
     try {
       body = await req.json();
     } catch {
-      return json({ error: "bad json" }, 400);
+      return chatReply("\u041D\u0435 \u0440\u0430\u0437\u043E\u0431\u0440\u0430\u043B \u0437\u0430\u043F\u0440\u043E\u0441.");
     }
     const messages = Array.isArray(body?.messages) ? body.messages : [];
-    const question = lastUserText(messages);
-    if (!question) return chatReply("\u041D\u0435 \u0440\u0430\u0441\u0441\u043B\u044B\u0448\u0430\u043B \u0432\u043E\u043F\u0440\u043E\u0441.");
+    if (!lastUserText(messages)) return chatReply("\u041D\u0435 \u0440\u0430\u0441\u0441\u043B\u044B\u0448\u0430\u043B \u0432\u043E\u043F\u0440\u043E\u0441.");
     try {
       const text = await withDeadline(
-        answer(messages, env),
+        answer(messages, apiKey, env),
         DEADLINE_MS,
         "\u041D\u0435 \u0443\u0441\u043F\u0435\u043B \u043D\u0430\u0439\u0442\u0438 \u043E\u0442\u0432\u0435\u0442. \u0421\u043F\u0440\u043E\u0441\u0438\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437."
       );
@@ -138,7 +137,7 @@ function lastUserText(messages) {
   }
   return "";
 }
-async function answer(messages, env) {
+async function answer(messages, apiKey, env) {
   const history = messages.filter((m) => m?.role === "user" || m?.role === "assistant").map((m) => ({
     role: m.role,
     content: typeof m.content === "string" ? m.content : m.content?.find?.((b) => b?.type === "text")?.text ?? ""
@@ -147,7 +146,7 @@ async function answer(messages, env) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({

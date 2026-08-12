@@ -12,6 +12,13 @@
  * и заголовком Authorization: Bearer <токен из настроек>.
  * Ответ ожидается тоже в форме OpenAI chat completions.
  *
+ * КЛЮЧ ПРИХОДИТ ОТ ОЧКОВ, А НЕ ХРАНИТСЯ ЗДЕСЬ.
+ * В поле Token приложения вписывается ключ Anthropic — воркер просто
+ * передаёт его дальше. Это сделано намеренно: настройка переменных
+ * окружения в панели Cloudflare не работает с телефона, и любой
+ * secret-based вариант упирался в неё. Заодно у воркера нет
+ * сохранённых учётных данных, которые можно было бы утащить.
+ *
  * ТАЙМАУТ. Очки ждут ответа около 30 секунд и молча обрывают связь.
  * Поэтому здесь свой дедлайн в 22 секунды: лучше вернуть честное
  * «не успел», чем оставить человека смотреть в пустой экран.
@@ -20,8 +27,6 @@
 import { buildSystemPrompt } from '../src/agent/prompt.ts';
 
 interface Env {
-  AGENT_TOKEN: string;
-  ANTHROPIC_API_KEY: string;
   /** Необязательно: модель и город для локальных запросов. */
   MODEL?: string;
   CITY?: string;
@@ -33,37 +38,36 @@ const MODEL_DEFAULT = 'claude-sonnet-5';
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors() });
+
+    // На GET отвечаем по-человечески: так можно открыть адрес в браузере
+    // и сразу увидеть, что воркер жив и какой версии.
+    if (req.method === 'GET') {
+      return json({ ok: true, agent: 'sergey-ai', hint: 'POST /v1/chat/completions' });
+    }
     if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
-    // Настройка не доделана — говорим об этом прямо на экране очков.
-    // Код ошибки тут бесполезен: очки покажут своё «network error», и
-    // человек останется без единой подсказки, что именно не так.
-    if (!env.ANTHROPIC_API_KEY) {
-      return chatReply('Не задан ANTHROPIC_API_KEY в настройках воркера.');
-    }
-    if (!env.AGENT_TOKEN) {
-      return chatReply('Не задан AGENT_TOKEN в настройках воркера.');
-    }
-
     const auth = req.headers.get('authorization') ?? '';
-    if (auth !== `Bearer ${env.AGENT_TOKEN}`) {
-      return chatReply('Токен не совпадает с AGENT_TOKEN воркера.');
+    const apiKey = auth.replace(/^Bearer\s+/i, '').trim();
+
+    if (!apiKey.startsWith('sk-ant-')) {
+      return chatReply(
+        'В поле Token приложения нужно вписать ключ Anthropic, начинающийся с sk-ant-.',
+      );
     }
 
     let body: any;
     try {
       body = await req.json();
     } catch {
-      return json({ error: 'bad json' }, 400);
+      return chatReply('Не разобрал запрос.');
     }
 
     const messages = Array.isArray(body?.messages) ? body.messages : [];
-    const question = lastUserText(messages);
-    if (!question) return chatReply('Не расслышал вопрос.');
+    if (!lastUserText(messages)) return chatReply('Не расслышал вопрос.');
 
     try {
       const text = await withDeadline(
-        answer(messages, env),
+        answer(messages, apiKey, env),
         DEADLINE_MS,
         'Не успел найти ответ. Спросите ещё раз.',
       );
@@ -91,7 +95,7 @@ function lastUserText(messages: any[]): string {
   return '';
 }
 
-async function answer(messages: any[], env: Env): Promise<string> {
+async function answer(messages: any[], apiKey: string, env: Env): Promise<string> {
   // Историю прокидываем целиком: Even AI ведёт диалог сам, и без неё
   // уточняющие вопросы («а сколько там стоит?») теряют смысл.
   const history = messages
@@ -109,7 +113,7 @@ async function answer(messages: any[], env: Env): Promise<string> {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': env.ANTHROPIC_API_KEY,
+      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
