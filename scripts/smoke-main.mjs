@@ -120,6 +120,7 @@ sock.say('где поесть рядом');
 await new Promise((r) => setTimeout(r, 300));
 
 assert.match(hud(), /Чайхана/, 'ответ должен появиться на экране');
+assert.match(hud(), /АРХИТЕКТОР/, 'подпись должна стоять над ответом');
 assert.equal(calls.filter((c) => c.includes('anthropic')).length, 2,
   'после инструмента модель обязана вызваться второй раз');
 assert.equal(calls.filter((c) => c.includes('overpass')).length, 1,

@@ -716,3 +716,23 @@ test('несколько результатов подряд собираютс�
   assert.equal(captured.messages.length, 3, 'два результата — одна реплика пользователя');
   assert.equal(captured.messages[2].content.length, 2);
 });
+
+// ─── Подпись над ответом ─────────────────────────────────────
+
+test('подпись стоит в заголовке и не отнимает место у текста', async () => {
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const { BRAND } = await import('../src/hud/strings.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  const answer = 'Чайхана — 150 м, uzbek';
+  await hud.result(BRAND, answer);
+
+  const last = [...bridge.calls].reverse()
+    .find((c) => c.method === 'createPage' || c.method === 'rebuildPage');
+  const page = last!.args[0] as any;
+
+  assert.equal(page.title, BRAND, 'подпись — в заголовке');
+  assert.equal(page.body, answer, 'тело содержит только ответ, без подписи');
+  hud.stopAuto();
+});

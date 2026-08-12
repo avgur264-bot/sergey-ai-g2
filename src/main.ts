@@ -6,7 +6,7 @@ import { AnthropicLlm, OpenAiLlm, type Llm } from './agent/llm.ts';
 import { Registry } from './agent/registry.ts';
 import { defaultTools } from './agent/tools/index.ts';
 import { Router } from './agent/router.ts';
-import { ERR } from './hud/strings.ts';
+import { ERR, BRAND } from './hud/strings.ts';
 import { loadConfig, type Config } from './config.ts';
 
 let bridge: Bridge;
@@ -384,7 +384,9 @@ async function think(question: string) {
     }, abort.signal);
 
     if (!fsm.to('DISPLAYING')) return;
-    await hud.result(turn.instant ? '' : 'ОТВЕТ', turn.text);
+    // Подпись стоит над любым ответом — и над мгновенным от инструмента,
+    // и над обычным от модели.
+    await hud.result(BRAND, turn.text);
   } catch (e: any) {
     if (e?.name === 'AbortError') { fsm.force('IDLE'); return; }
     console.error(e);
