@@ -12,6 +12,8 @@ const fields = {
   baseUrl: $<HTMLInputElement>('baseUrl'),
   webSearch: $<HTMLInputElement>('webSearch'),
   city: $<HTMLInputElement>('city'),
+  wakeEnabled: $<HTMLInputElement>('wakeEnabled'),
+  wakeWord: $<HTMLInputElement>('wakeWord'),
 };
 
 const statusEl = $('status');
@@ -34,6 +36,8 @@ async function init() {
   fields.baseUrl.value = cfg.baseUrl;
   fields.webSearch.checked = cfg.webSearch;
   fields.city.value = cfg.city;
+  fields.wakeEnabled.checked = cfg.wakeEnabled;
+  fields.wakeWord.value = cfg.wakeWord;
 
   render(cfg);
 
@@ -69,6 +73,8 @@ async function init() {
       baseUrl: fields.baseUrl.value.trim().replace(/\/$/, ''),
       webSearch: fields.webSearch.checked,
       city: fields.city.value.trim(),
+      wakeEnabled: fields.wakeEnabled.checked,
+      wakeWord: fields.wakeWord.value.trim() || 'сергей',
     };
 
     try {

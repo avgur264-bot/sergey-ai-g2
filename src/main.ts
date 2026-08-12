@@ -60,6 +60,7 @@ async function main() {
   });
 
   await hud.boot({ title: 'SERGEY AI', body: 'Тап — говорить', footer: '' });
+  void startWake();
 }
 
 /** Подхватывает изменённые настройки без перезапуска приложения. */
@@ -81,6 +82,7 @@ async function reloadConfig() {
   }
 
   router = buildRouter();
+  await stopWake();
   if (fsm.state === 'IDLE' || fsm.state === 'ERROR') {
     fsm.force('IDLE');
   }
@@ -150,6 +152,7 @@ async function onGesture(g: Gesture) {
 function onLifecycle(e: string) {
   // Забытый включённый микрофон = разряженные очки за пару часов.
   if (e === 'foreground_exit' || e === 'force_exit') {
+    void stopWake();
     stt?.close();
     bridge.stopMic().catch(() => {});
     cancel();
@@ -211,14 +214,87 @@ async function onStateChange(s: string) {
   }
   if (s === 'IDLE') {
     await hud.status('SERGEY AI', 'Тап — говорить');
+    void startWake();
+  } else {
+    void stopWake();
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Основной цикл
+// Голосовая активация
 // ─────────────────────────────────────────────────────────────
 
+let wake: SttSession | null = null;
+
+/**
+ * Слушает в фоне и ждёт обращения по имени.
+ *
+ * Микрофон остаётся включённым всё время ожидания — иначе поймать
+ * обращение нечем. Это расходует батарею и оплачивается по времени
+ * распознавания, поэтому режим выключен по умолчанию.
+ */
+async function startWake() {
+  if (!cfg.wakeEnabled || wake || fsm.state !== 'IDLE') return;
+
+  wake = new SttSession({
+    apiKey: cfg.sttKey,
+    hints: [cfg.wakeWord, ...cfg.hints],
+    continuous: true,
+    onFinal: (t) => { void onWakeHeard(t); },
+    onError: (e) => {
+      console.warn('[wake] сбой ожидания:', e);
+      void stopWake();
+    },
+  });
+
+  try {
+    await wake.open();
+    bridge.onPcm((chunk) => wake?.push(chunk));
+    await bridge.startMic();
+    await hud.status('SERGEY AI', `Скажите «${cfg.wakeWord}» или тапните`);
+  } catch (e) {
+    console.warn('[wake] не удалось начать ожидание:', e);
+    await stopWake();
+  }
+}
+
+async function stopWake() {
+  if (!wake) return;
+  wake.close();
+  wake = null;
+  // Микрофон гасим только если он не нужен активной сессии вопроса.
+  if (!stt) await bridge.stopMic().catch(() => {});
+}
+
+/** Обращение прозвучало — отделяем вопрос от имени. */
+async function onWakeHeard(text: string) {
+  const word = cfg.wakeWord.toLowerCase().trim();
+  if (!word) return;
+
+  const lower = text.toLowerCase();
+  const at = lower.indexOf(word);
+  if (at === -1) return;   // говорили не с нами
+
+  const rest = text.slice(at + word.length).replace(/^[\s,.:!?—-]+/, '').trim();
+
+  await stopWake();
+
+  if (rest.length >= 3) {
+    // Вопрос прозвучал сразу за именем — не заставляем повторять.
+    if (!fsm.to('LISTENING')) { void startWake(); return; }
+    await hud.status('ДУМАЮ', rest);
+    void think(rest);
+  } else {
+    // Позвали и молчат — переходим к обычному приёму вопроса.
+    await startListening();
+  }
+}
+
+
 async function startListening() {
+  // Один микрофон на двоих не делится: перед приёмом вопроса
+  // останавливаем фоновое ожидание.
+  await stopWake();
   if (!fsm.to('LISTENING')) return;
   await hud.status('СЛУШАЮ', '');
 

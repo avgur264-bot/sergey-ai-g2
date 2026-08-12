@@ -19,6 +19,13 @@ export interface SttOptions {
   onError: (e: Error) => void;
   /** Тишина, после которой считаем фразу законченной. */
   silenceMs?: number;
+  /**
+   * Непрерывный режим для ожидания голосовой команды: после каждой
+   * распознанной фразы сессия не закрывается, а продолжает слушать
+   * следующую. Обычный режим закрывается — там одна фраза и есть
+   * вопрос.
+   */
+  continuous?: boolean;
 }
 
 export class SttSession {
@@ -26,6 +33,7 @@ export class SttSession {
   private finalText = '';
   private partialText = '';
   private silenceTimer?: ReturnType<typeof setTimeout>;
+  private keepAlive?: ReturnType<typeof setInterval>;
   private closed = false;
   private opts: SttOptions;
 
@@ -58,7 +66,20 @@ export class SttSession {
         ws.close();
       }, 5000);
 
-      ws.onopen = () => { clearTimeout(failFast); resolve(); };
+      ws.onopen = () => {
+        clearTimeout(failFast);
+        // В режиме ожидания между фразами бывают длинные паузы, а
+        // провайдер закрывает соединение, если долго не приходит
+        // ничего. Периодический KeepAlive держит его открытым.
+        if (this.opts.continuous) {
+          this.keepAlive = setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({ type: 'KeepAlive' }));
+            }
+          }, 7000);
+        }
+        resolve();
+      };
 
       ws.onmessage = (ev) => this.handle(ev.data);
       ws.onerror = () => {
@@ -126,9 +147,21 @@ export class SttSession {
 
   private flush() {
     if (this.closed) return;
-    this.closed = true;
+
     clearTimeout(this.silenceTimer);
     const text = (this.finalText + ' ' + this.partialText).trim();
+
+    if (this.opts.continuous) {
+      // Ждём команду: отдаём распознанное и слушаем дальше. Закрывать
+      // сокет тут нельзя — переподключение на каждой фразе съедало бы
+      // секунды и не давало поймать следующую.
+      this.finalText = '';
+      this.partialText = '';
+      if (text) this.opts.onFinal(text);
+      return;
+    }
+
+    this.closed = true;
     this.closeSocket();
     if (text) this.opts.onFinal(text);
     else this.opts.onError(new Error('Ничего не расслышал'));
@@ -137,6 +170,7 @@ export class SttSession {
   /** Рвёт соединение, не трогая накопленный текст. */
   private closeSocket() {
     clearTimeout(this.silenceTimer);
+    if (this.keepAlive) { clearInterval(this.keepAlive); this.keepAlive = undefined; }
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) this.ws.close();
     this.ws = undefined;
   }

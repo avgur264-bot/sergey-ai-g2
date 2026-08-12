@@ -44,8 +44,13 @@ async function geocodeCity(city: string, signal: AbortSignal): Promise<Coords> {
   return c;
 }
 
-/** Координаты устройства, если доступны; иначе — центр города из настроек. */
-async function resolveCoords(ctx: ToolContext): Promise<Coords> {
+/** Место из вопроса или город из настроек → координаты. */
+async function resolveCoords(ctx: ToolContext, place?: string): Promise<Coords> {
+  // Место, названное в самом вопросе, всегда главнее: «рестораны в
+  // Самарканде» нельзя искать вокруг города из настроек.
+  const named = String(place ?? '').trim();
+  if (named) return geocodeCity(named, ctx.signal);
+
   try {
     return await new Promise<Coords>((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(
@@ -58,7 +63,7 @@ async function resolveCoords(ctx: ToolContext): Promise<Coords> {
     // Геолокация в режиме прототипа не работает — это ожидаемо,
     // поэтому город в настройках и существует.
     const city = String(ctx.cfg.city ?? '').trim();
-    if (!city) throw new Error('Укажите город в настройках');
+    if (!city) throw new Error('Укажите город в настройках или назовите его в вопросе');
     return geocodeCity(city, ctx.signal);
   }
 }
@@ -88,33 +93,49 @@ function tagFor(query: string): string {
 export const placesTool: ToolSpec = {
   name: 'places_near',
   description:
-    'Найти заведения поблизости: рестораны, кафе, бары, аптеки, банкоматы, '
-    + 'заправки, магазины, отели, парки. Возвращает названия и расстояние. '
-    + 'Рейтингов и отзывов нет.',
+    'Найти заведения: рестораны, кафе, бары, аптеки, банкоматы, заправки, '
+    + 'магазины, отели, парки. Если пользователь назвал город или район — '
+    + 'обязательно передай его в location, иначе поиск пойдёт вокруг '
+    + 'текущего места. Если названо блюдо или кухня («плов», «пицца», '
+    + '«суши») — передай это в keyword. Рейтингов и отзывов нет.',
   kind: 'read',
   transport: 'direct',
-  label: 'ИЩУ РЯДОМ',
+  label: 'ИЩУ МЕСТА',
   schema: {
     type: 'object',
     properties: {
       category: {
         type: 'string',
-        description: 'Что искать одним словом: ресторан, кафе, аптека, банкомат…',
+        description: 'Тип места одним словом: ресторан, кафе, аптека, банкомат…',
       },
-      radius: { type: 'number', description: 'Радиус поиска в метрах, по умолчанию 1500' },
+      location: {
+        type: 'string',
+        description: 'Город, район или улица из вопроса. Например: Самарканд.',
+      },
+      keyword: {
+        type: 'string',
+        description: 'Блюдо или кухня из вопроса: плов, пицца, суши.',
+      },
+      radius: { type: 'number', description: 'Радиус поиска в метрах' },
     },
     required: ['category'],
   },
   async run(args, ctx) {
-    const { lat, lon } = await resolveCoords(ctx);
-    const radius = Math.min(Math.max(Number(args.radius) || 1500, 200), 5000);
+    const place = args.location ? String(args.location) : '';
+    const { lat, lon } = await resolveCoords(ctx, place);
+
+    // Названный город ищем широко — человек имеет в виду весь город,
+    // а не полтора километра вокруг его геометрического центра.
+    const fallback = place ? 6000 : 1500;
+    const maxR = place ? 15000 : 5000;
+    const radius = Math.min(Math.max(Number(args.radius) || fallback, 200), maxR);
     const tag = tagFor(String(args.category));
 
     // Просим только именованные объекты: безымянная точка на карте
     // человеку в очках ничего не даёт.
-    const q = `[out:json][timeout:15];
+    const q = `[out:json][timeout:20];
       nwr[${tag}][name](around:${radius},${lat},${lon});
-      out center 12;`;
+      out center 60;`;
 
     const res = await fetch(OVERPASS, {
       method: 'POST',
@@ -125,7 +146,9 @@ export const placesTool: ToolSpec = {
     if (!res.ok) throw new Error(`Карты: ${res.status}`);
 
     const d = await res.json();
-    const items = (d.elements ?? [])
+    const kw = String(args.keyword ?? '').toLowerCase().trim();
+
+    let items = (d.elements ?? [])
       .map((e: any) => {
         const elat = e.lat ?? e.center?.lat;
         const elon = e.lon ?? e.center?.lon;
@@ -136,11 +159,21 @@ export const placesTool: ToolSpec = {
           dist: Math.round(haversine(lat, lon, elat, elon)),
         };
       })
-      .filter((x: any) => x && x.name)
-      .sort((a: any, b: any) => a.dist - b.dist)
-      .slice(0, 5);
+      .filter((x: any) => x && x.name);
 
-    if (!items.length) return { data: 'ничего не найдено рядом', direct: 'НИЧЕГО РЯДОМ' };
+    if (kw) {
+      // Блюдо в OSM отдельным полем не хранится: ищем по кухне и по
+      // названию — «Plov Center» найдётся именно так.
+      const root = kw.slice(0, 4);
+      const matched = items.filter((i: any) =>
+        i.cuisine.toLowerCase().includes(root) || i.name.toLowerCase().includes(root));
+      // Если по слову ничего нет, лучше показать ближайшие места
+      // подходящей категории, чем пустой экран.
+      if (matched.length) items = matched;
+    }
+
+    items = items.sort((a: any, b: any) => a.dist - b.dist).slice(0, 5);
+    if (!items.length) return { data: 'ничего не найдено', direct: 'НИЧЕГО НЕ НАШЁЛ' };
 
     const lines = items.map((i: any) =>
       `${i.name} — ${fmtDist(i.dist)}${i.cuisine ? `, ${i.cuisine}` : ''}`);

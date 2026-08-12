@@ -131,6 +131,28 @@
   </fieldset>
 
   <fieldset>
+    <legend>Активация</legend>
+
+    <label class="row">
+      <input id="wakeEnabled" type="checkbox">
+      <span class="lbl">Включать голосом, без тапа</span>
+    </label>
+    <span class="note">
+      Микрофон остаётся включённым и слушает обращение. Заметно расходует
+      батарею очков, распознавание оплачивается по времени — около $0.46
+      за час ожидания. Тап продолжает работать всегда.
+    </span>
+
+    <label>
+      <span class="lbl">Слово-обращение</span>
+      <input id="wakeWord" type="text" autocomplete="off" placeholder="Сергей">
+      <span class="note">
+        Скажите его, а следом вопрос: «Сергей, где поесть рядом».
+      </span>
+    </label>
+  </fieldset>
+
+  <fieldset>
     <legend>Интернет</legend>
 
     <label class="row">

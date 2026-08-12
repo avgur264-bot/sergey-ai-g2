@@ -556,3 +556,70 @@ test('без города и геолокации places_near говорит, ч
     /город/i,
   );
 });
+
+// ─── Место из вопроса ────────────────────────────────────────
+
+test('город из вопроса важнее города из настроек', async () => {
+  const { placesTool } = await import('../src/agent/tools/free.ts');
+  const asked: string[] = [];
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init?: any) => {
+    const u = String(url);
+    if (u.includes('nominatim')) {
+      asked.push(decodeURIComponent(u));
+      return { ok: true, json: async () => ([{ lat: '39.65', lon: '66.96' }]) };
+    }
+    asked.push(String(init?.body ?? ''));
+    return {
+      ok: true,
+      json: async () => ({
+        elements: [
+          { lat: 39.651, lon: 66.961, tags: { name: 'Плов Центр', cuisine: 'uzbek' } },
+          { lat: 39.652, lon: 66.962, tags: { name: 'Пиццерия', cuisine: 'pizza' } },
+        ],
+      }),
+    };
+  }) as any;
+
+  try {
+    const r = await placesTool.run(
+      { category: 'ресторан', location: 'Самарканд', keyword: 'плов' },
+      { cfg: { city: 'Алматы' }, signal: new AbortController().signal, bridge: {} as any },
+    );
+    assert.ok(
+      asked[0].includes('%D0%A1%D0%B0%D0%BC') || asked[0].includes('Самарканд'),
+      'геокодировать надо город из вопроса, а не из настроек',
+    );
+    assert.match(r.direct!, /Плов Центр/, 'уточнение блюда должно фильтровать список');
+    assert.ok(!r.direct!.includes('Пиццерия'), 'неподходящее отсеивается');
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test('если по блюду ничего нет, показываем ближайшие подходящие места', async () => {
+  const { placesTool } = await import('../src/agent/tools/free.ts');
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any) => {
+    if (String(url).includes('nominatim')) {
+      return { ok: true, json: async () => ([{ lat: '39.65', lon: '66.96' }]) };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        elements: [{ lat: 39.651, lon: 66.961, tags: { name: 'Кафе Дружба' } }],
+      }),
+    };
+  }) as any;
+
+  try {
+    const r = await placesTool.run(
+      { category: 'ресторан', location: 'Самарканд', keyword: 'суши' },
+      { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
+    );
+    assert.match(r.direct!, /Кафе Дружба/, 'пустой экран хуже, чем близкие варианты');
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
