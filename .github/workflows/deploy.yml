@@ -41,6 +41,7 @@ jobs:
           node --experimental-strip-types scripts/smoke-main.mjs
           MODE=question node --experimental-strip-types scripts/smoke-main.mjs
           WAKE=1 node --experimental-strip-types scripts/smoke-main.mjs
+          node --experimental-strip-types scripts/smoke-agent.mjs
 
       - name: Собрать под GitHub Pages
         run: npm run build

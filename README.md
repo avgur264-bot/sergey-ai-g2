@@ -162,6 +162,30 @@ export const noteTool: ToolSpec = {
 | `send_message` | напрямую | токен бота и chat_id |
 | `calendar_list` / `calendar_create` | прокси | воркер + Google OAuth |
 
+## Агент для штатного Even AI (рекомендуемый путь)
+
+В приложении Even есть «Add Agent»: имя, URL, токен. Указав туда адрес
+воркера из `worker/agent.ts`, вы получаете голосовую активацию,
+распознавание и экран силами самих очков — а отвечает наш агент с
+поиском и инструментами. Отдельный плагин, ключ Deepgram и тап
+становятся не нужны.
+
+Очки ожидают эндпоинт в формате OpenAI chat completions и ждут ответа
+около 30 секунд. Публичной документации на этот формат нет — он
+восстановлен по наблюдениям сообщества, поэтому при обновлениях
+прошивки его стоит перепроверять.
+
+```bash
+npm i -g wrangler
+wrangler login
+cd worker
+wrangler secret put AGENT_TOKEN        --config wrangler-agent.toml
+wrangler secret put ANTHROPIC_API_KEY  --config wrangler-agent.toml
+wrangler deploy --config wrangler-agent.toml
+```
+
+Полученный адрес вписывается в Add Agent → URL, `AGENT_TOKEN` → Token.
+
 ## Прокси (нужен не всем)
 
 Разверните `worker/`, если хотите календарь, или если телефон

@@ -1,0 +1,22 @@
+# Агент для штатного Even AI.
+#
+# Развёртывание:
+#   npm i -g wrangler
+#   wrangler login
+#   cd worker
+#   wrangler secret put AGENT_TOKEN     --config wrangler-agent.toml
+#   wrangler secret put ANTHROPIC_API_KEY --config wrangler-agent.toml
+#   wrangler deploy --config wrangler-agent.toml
+#
+# Адрес вида https://sergey-ai-agent.<ваш>.workers.dev вписывается
+# в приложении Even: Add Agent → URL, а AGENT_TOKEN → Token.
+
+name = "sergey-ai-agent"
+main = "agent.ts"
+compatibility_date = "2026-08-01"
+
+[vars]
+# Город для локальных запросов «рядом». Необязательно.
+CITY = ""
+# Модель. Пусто = claude-sonnet-5.
+MODEL = ""
