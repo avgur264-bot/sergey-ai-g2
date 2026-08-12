@@ -125,18 +125,24 @@ async function onGesture(g: Gesture) {
 
   switch (g.type) {
     case 'click':
-      if (fsm.state === 'IDLE' || fsm.state === 'DISPLAYING') await startListening();
+      if (fsm.state === 'DISPLAYING' && !hud.atLastPage) {
+        // Пока ответ не дочитан, тап листает его дальше. Начинать новый
+        // вопрос с середины чужого ответа человек почти никогда не хочет,
+        // а свайп может не долететь — тап надёжнее.
+        await hud.nextManual();
+      }
+      else if (fsm.state === 'IDLE' || fsm.state === 'DISPLAYING') await startListening();
       else if (fsm.state === 'LISTENING') stt?.finish();       // ручное завершение
       else if (fsm.state === 'THINKING') cancel();             // прервать
       else if (fsm.state === 'ERROR') fsm.force('IDLE');       // «Тап — повторить»
       break;
 
     case 'scroll_up':
-      if (fsm.state === 'DISPLAYING') await hud.prev();
+      if (fsm.state === 'DISPLAYING') await hud.prevManual();
       break;
 
     case 'scroll_down':
-      if (fsm.state === 'DISPLAYING') await hud.next();
+      if (fsm.state === 'DISPLAYING') await hud.nextManual();
       break;
   }
 }

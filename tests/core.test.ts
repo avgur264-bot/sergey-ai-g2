@@ -324,3 +324,47 @@ test('zOrderIndex задан у всех контейнеров и уникал�
   assert.ok(z.every((v: unknown) => typeof v === 'number'), 'zOrderIndex должен быть у всех');
   assert.equal(new Set(z).size, z.length, 'zOrderIndex должны быть уникальны');
 });
+
+// ─── Пагинация ответа и автопрокрутка ────────────────────────
+
+test('atLastPage корректен для одностраничного и многостраничного ответа', async () => {
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  await hud.result('ОТВЕТ', 'Коротко.');
+  assert.equal(hud.atLastPage, true, 'один экран — сразу последняя страница');
+
+  await hud.result('ОТВЕТ', 'Предложение. '.repeat(60));
+  assert.equal(hud.isMultiPage, true);
+  assert.equal(hud.atLastPage, false, 'на первой из нескольких — не последняя');
+  hud.stopAuto();
+});
+
+test('подвал подсказывает, что тап листает дальше', async () => {
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  await hud.result('ОТВЕТ', 'Предложение. '.repeat(60));
+  const last = [...bridge.calls].reverse()
+    .find((c) => c.method === 'createPage' || c.method === 'rebuildPage');
+  const footer = (last!.args[0] as any).footer as string;
+  assert.match(footer, /1\/\d+/, 'должен быть номер страницы');
+  assert.match(footer, /дальше/, 'должна быть подсказка про тап');
+  hud.stopAuto();
+});
+
+test('новый экран отменяет автопрокрутку прошлого ответа', async () => {
+  // Иначе отложенный таймер перерисует «СЛУШАЮ» страницей старого текста.
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  await hud.result('ОТВЕТ', 'Предложение. '.repeat(60));
+  await hud.status('СЛУШАЮ', '');
+
+  const before = bridge.calls.length;
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(bridge.calls.length, before, 'после смены экрана рисовать нечего');
+});

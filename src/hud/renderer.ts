@@ -10,9 +10,14 @@ export interface HudPage {
 /**
  * Сколько символов реально влезает на экран 576×288 — подбирается
  * эмпирически: API смены размера шрифта в SDK нет, поэтому единственный
- * способ узнать — посмотреть на очках. Начните с этого значения и правьте.
+ * способ узнать — посмотреть на очках.
+ *
+ * Значение намеренно занижено. Ошибка в большую сторону обрезает текст
+ * молча, и человек видит оборванный ответ, не понимая, что часть
+ * потерялась. Ошибка в меньшую сторону всего лишь добавляет страницу,
+ * которая перелистнётся сама.
  */
-const CHARS_PER_PAGE = 260;
+const CHARS_PER_PAGE = 180;
 
 /** Режет текст на страницы по границам предложений, не рвя слова. */
 export function paginate(text: string, limit = CHARS_PER_PAGE): string[] {
@@ -76,6 +81,9 @@ export class Hud {
 
   /** Полная замена экрана. Даёт вспышку — не использовать для стриминга. */
   async show(page: HudPage) {
+    // Любой новый экран отменяет автопрокрутку прошлого ответа: иначе
+    // отложенный таймер перерисует «СЛУШАЮ» страницей старого текста.
+    this.stopAuto();
     this.pages = [];
     this.title = page.title;
     const wasCreated = this.created;
@@ -102,6 +110,7 @@ export class Hud {
     this.pages = paginate(text);
     this.index = 0;
     await this.render();
+    this.scheduleAuto();
   }
 
   async next() {
@@ -112,11 +121,50 @@ export class Hud {
     if (this.index > 0) { this.index--; await this.render(); }
   }
 
+  /** Листание руками: отменяет автопрокрутку, дальше человек сам. */
+  async nextManual() { this.stopAuto(); await this.next(); }
+  async prevManual() { this.stopAuto(); await this.prev(); }
+
   get hasPages() { return this.pages.length > 0; }
   get isMultiPage() { return this.pages.length > 1; }
+  get atLastPage() { return this.index >= this.pages.length - 1; }
+
+  /**
+   * Автопролистывание длинного ответа.
+   *
+   * Полагаться только на свайп нельзя: если жест не долетит, человек
+   * увидит первую страницу и решит, что ответ обрезан. Штатный Even AI
+   * прокручивает текст сам — здесь тот же принцип. Ручные жесты
+   * продолжают работать и просто отменяют автопрокрутку.
+   */
+  private autoTimer?: ReturnType<typeof setTimeout>;
+
+  private scheduleAuto() {
+    this.stopAuto();
+    if (this.atLastPage) return;
+
+    // Время на страницу — по длине текста, но в разумных пределах:
+    // читать HUD быстрее, чем книгу, и медленнее, чем заголовок.
+    const chars = this.pages[this.index]?.length ?? 0;
+    const ms = Math.min(9000, Math.max(3500, chars * 55));
+
+    this.autoTimer = setTimeout(() => {
+      void this.next().then(() => this.scheduleAuto());
+    }, ms);
+  }
+
+  stopAuto() {
+    if (this.autoTimer) { clearTimeout(this.autoTimer); this.autoTimer = undefined; }
+  }
 
   private async render() {
-    const footer = this.isMultiPage ? `${this.index + 1}/${this.pages.length}` : '';
+    // Подвал не только нумерует страницы, но и говорит, что делать
+    // дальше: без подсказки неочевидно, что ответ продолжается.
+    const footer = this.isMultiPage
+      ? (this.atLastPage
+          ? `${this.index + 1}/${this.pages.length} · тап — новый вопрос`
+          : `${this.index + 1}/${this.pages.length} · тап — дальше`)
+      : '';
     const page = { title: this.title, body: this.pages[this.index] ?? '', footer };
     return this.enqueue(async () => {
       if (!this.created) { await this.bridge.createPage(page); this.created = true; return; }
