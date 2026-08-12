@@ -3,6 +3,22 @@ import type { Registry, ToolSpec, ToolContext } from './registry.ts';
 import { loadMemory } from './tools/index.ts';
 import type { Bridge } from '../sdk/bridge.ts';
 
+/**
+ * Системная инструкция. Дата подставляется на каждый запрос.
+ *
+ * Без неё модель не знает, какой сегодня день: она ориентируется на
+ * момент обучения, ищет по прошлогодним запросам и выдаёт устаревшее
+ * за актуальное. Одна строка с датой заметно улучшает свежесть ответов.
+ */
+export function buildSystemPrompt(now = new Date()): string {
+  const today = now.toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
+  return `Сегодня ${today}.
+
+${SYSTEM_PROMPT}`;
+}
+
 export const SYSTEM_PROMPT = `Ты — SERGEY AI, ассистент в очках Even G2.
 
 Пользователь читает ответ на маленьком экране на ходу. Ему нужен готовый
@@ -57,6 +73,13 @@ export const SYSTEM_PROMPT = `Ты — SERGEY AI, ассистент в очка
     Лучше назвать место без оценки, чем с выдуманной.
 9f. Противоречат источники — бери тот, что свежее и ближе к
     первоисточнику (сайт заведения, карты, официальный сайт).
+9g. СВЕЖЕСТЬ. Всё, что меняется — цены, курсы, расписания, составы,
+    должности, работает ли заведение — проверяй поиском ВСЕГДА, даже
+    если помнишь ответ. Твоя память устарела на месяцы. В запрос
+    добавляй текущий год.
+9h. Если нашёл только старые данные, скажи, к какому году они
+    относятся, одним словом в скобках. Молча выдавать старое за
+    сегодняшнее нельзя.
 
 10. wiki_lookup — справка о человеке, месте, организации.
 11. memory_save — только по явной просьбе запомнить.
@@ -197,9 +220,10 @@ export class Router {
 
   private async runTurn(input: string, cb: RouterCallbacks, signal: AbortSignal): Promise<Turn> {
     const memory = await loadMemory(this.bridge);
+    const base = buildSystemPrompt();
     const system = memory.length
-      ? `${SYSTEM_PROMPT}\n\nЧто ты знаешь о пользователе:\n${memory.map((m) => `- ${m}`).join('\n')}`
-      : SYSTEM_PROMPT;
+      ? `${base}\n\nЧто ты знаешь о пользователе:\n${memory.map((m) => `- ${m}`).join('\n')}`
+      : base;
 
     this.history.push({ role: 'user', content: input });
     this.trim();

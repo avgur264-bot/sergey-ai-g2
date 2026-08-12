@@ -20,7 +20,7 @@ const statusEl = $('status');
 const savedEl = $('saved');
 
 const PRESETS: Record<string, { model: string; baseUrl: string }> = {
-  anthropic: { model: 'claude-haiku-4-5-20251001', baseUrl: 'https://api.anthropic.com' },
+  anthropic: { model: 'claude-sonnet-5', baseUrl: 'https://api.anthropic.com' },
   openai:    { model: 'gpt-4o-mini',               baseUrl: 'https://api.openai.com' },
 };
 

@@ -61,7 +61,7 @@ export class AnthropicLlm implements Llm {
   /** Адрес API. Замените на URL прокси, если нужен серверный egress. */
   private baseUrl: string;
 
-  constructor(apiKey: string, model = 'claude-haiku-4-5-20251001', baseUrl = 'https://api.anthropic.com') {
+  constructor(apiKey: string, model = 'claude-sonnet-5', baseUrl = 'https://api.anthropic.com') {
     this.apiKey = apiKey;
     this.model = model;
     this.baseUrl = baseUrl;
@@ -82,10 +82,10 @@ export class AnthropicLlm implements Llm {
       tools.push({
         type: 'web_search_20250305',
         name: 'web_search',
-        // Двух-трёх поисков хватает, чтобы найти места и их рейтинги;
-        // запас до пяти нужен, когда с первого раза не нашлось и модель
-        // переформулирует запрос. Пустой ответ дороже лишнего цента.
-        max_uses: 5,
+        // Запас нужен, чтобы модель могла переформулировать запрос,
+        // проверить факт по второму источнику и уточнить свежесть.
+        // Экономия на поисках возвращается неточным ответом.
+        max_uses: 8,
         ...(o.city
           ? { user_location: { type: 'approximate', city: o.city } }
           : {}),

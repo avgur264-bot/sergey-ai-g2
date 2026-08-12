@@ -890,7 +890,7 @@ test('старые настройки с выключенным поиском �
 
   const cfg = await loadConfig(bridge as any);
   assert.equal(cfg.webSearch, true, 'поиск должен включиться при обновлении');
-  assert.equal(JSON.parse(stored).version, 2, 'версия должна записаться');
+  assert.equal(JSON.parse(stored).version, 3, 'версия должна записаться');
 
   // Осознанное выключение после миграции обязано сохраняться.
   stored = JSON.stringify({ ...JSON.parse(stored), webSearch: false });
@@ -903,4 +903,35 @@ test('инструкция требует конкретных поисковы�
   const flat = SYSTEM_PROMPT.replace(/\s+/g, ' ');
   assert.match(flat, /не придумывай цифру/i, 'запрет на выдуманные рейтинги');
   assert.match(flat, /переформулируй/i, 'при плохой выдаче — искать заново');
+});
+
+test('модель обновляется только у тех, кто её не выбирал сам', async () => {
+  const { loadConfig } = await import('../src/config.ts');
+
+  // Не выбирал: стоит прежнее умолчание — переводим на сильную модель.
+  let stored = JSON.stringify({ model: 'claude-haiku-4-5-20251001', version: 2 });
+  const bridgeA = {
+    async get() { return stored; },
+    async set(_k: string, v: string) { stored = v; },
+  };
+  const a = await loadConfig(bridgeA as any);
+  assert.notEqual(a.model, 'claude-haiku-4-5-20251001', 'прежнее умолчание обновляется');
+
+  // Выбрал сам: чужой осознанный выбор трогать нельзя.
+  let stored2 = JSON.stringify({ model: 'gpt-4o-mini', version: 2 });
+  const bridgeB = {
+    async get() { return stored2; },
+    async set(_k: string, v: string) { stored2 = v; },
+  };
+  const b = await loadConfig(bridgeB as any);
+  assert.equal(b.model, 'gpt-4o-mini', 'выбранная вручную модель сохраняется');
+});
+
+test('в инструкцию подставляется сегодняшняя дата', async () => {
+  // Без даты модель ориентируется на момент обучения и выдаёт
+  // прошлогоднее за актуальное.
+  const { buildSystemPrompt } = await import('../src/agent/router.ts');
+  const p = buildSystemPrompt(new Date('2026-08-12T10:00:00Z'));
+  assert.match(p, /Сегодня 12 августа 2026/, 'дата должна стоять первой строкой');
+  assert.match(p.replace(/\s+/g, ' '), /текущий год/i, 'правило про свежесть на месте');
 });

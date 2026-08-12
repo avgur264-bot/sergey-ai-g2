@@ -36,7 +36,7 @@ export interface Config {
 const DEFAULTS: Config = {
   provider: 'anthropic',
   llmKey: '',
-  model: 'claude-haiku-4-5-20251001',
+  model: 'claude-sonnet-5',
   baseUrl: 'https://api.anthropic.com',
   sttKey: '',
   hints: [],
@@ -44,7 +44,7 @@ const DEFAULTS: Config = {
   city: '',
   wakeEnabled: false,
   wakeWord: 'сергей',
-  version: 2,
+  version: 3,
 };
 
 /**
@@ -64,7 +64,10 @@ const DEFAULTS: Config = {
  *
  * Версия позволяет один раз переспросить такие решения при обновлении.
  */
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
+
+/** Прежнее умолчание — по нему узнаём тех, кто модель не выбирал сам. */
+const LEGACY_MODEL = 'claude-haiku-4-5-20251001';
 
 export async function loadConfig(bridge: Bridge): Promise<Config> {
   const raw = await bridge.get('cfg');
@@ -79,11 +82,19 @@ export async function loadConfig(bridge: Bridge): Promise<Config> {
 
   const cfg = { ...DEFAULTS, ...saved };
 
-  if ((saved.version ?? 1) < CONFIG_VERSION) {
-    // Единственная миграция: включаем поиск тем, у кого он остался
-    // выключенным с прежних умолчаний. Осознанно выключить его можно
-    // снова — версия уже поднята, второй раз включать не станем.
-    cfg.webSearch = true;
+  const from = saved.version ?? 1;
+  if (from < CONFIG_VERSION) {
+    // Версия 2: включаем поиск тем, у кого он остался выключенным с
+    // прежних умолчаний. Осознанно выключить его можно снова — версия
+    // уже поднята, второй раз включать не станем.
+    if (from < 2) cfg.webSearch = true;
+
+    // Версия 3: переводим на более сильную модель. Она заметно лучше
+    // разбирает результаты поиска и реже принимает старое за
+    // актуальное. Трогаем только тех, кто не менял модель сам: чужой
+    // осознанный выбор перезаписывать нельзя.
+    if (from < 3 && saved.model === LEGACY_MODEL) cfg.model = DEFAULTS.model;
+
     cfg.version = CONFIG_VERSION;
     await bridge.set('cfg', JSON.stringify(cfg)).catch(() => {});
   }
