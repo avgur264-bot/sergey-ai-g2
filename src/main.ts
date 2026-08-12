@@ -83,6 +83,8 @@ async function reloadConfig() {
   }
 
   router = buildRouter();
+  // Настройки изменились — возможно, починили и причину сбоя голоса.
+  wakeBroken = false;
   await stopWake();
   if (fsm.state === 'IDLE' || fsm.state === 'ERROR') {
     fsm.force('IDLE');
@@ -267,6 +269,13 @@ function setMic(on: boolean): Promise<void> {
 // ─────────────────────────────────────────────────────────────
 
 let wake: SttSession | null = null;
+/**
+ * Ожидание уже падало в этой сессии.
+ *
+ * Без флага каждый возврат в покой заново дёргал бы неработающее
+ * соединение: две попытки, две ошибки, мигающий экран — и так по кругу.
+ */
+let wakeBroken = false;
 
 /**
  * Слушает в фоне и ждёт обращения по имени.
@@ -276,27 +285,50 @@ let wake: SttSession | null = null;
  * распознавания, поэтому режим выключен по умолчанию.
  */
 async function startWake() {
-  if (!cfg.wakeEnabled || wake || fsm.state !== 'IDLE') return;
+  if (!cfg.wakeEnabled || wake || wakeBroken || fsm.state !== 'IDLE') return;
 
-  wake = new SttSession({
-    apiKey: cfg.sttKey,
-    hints: [cfg.wakeWord, ...cfg.hints],
-    continuous: true,
-    onFinal: (t) => { void onWakeHeard(t); },
-    onError: (e) => {
-      console.warn('[wake] сбой ожидания:', e);
-      void stopWake();
-    },
-  });
+  // Подсказки распознавания поддерживаются не всеми версиями модели:
+  // на части из них запрос с ними отвергается целиком. Пробуем сначала
+  // с подсказкой на слово-обращение, а если не вышло — без неё.
+  // Молчаливое падение здесь недопустимо: человек включил голос в
+  // настройках и ждёт, что он работает.
+  for (const withHints of [true, false]) {
+    const session = new SttSession({
+      apiKey: cfg.sttKey,
+      hints: withHints ? [cfg.wakeWord, ...cfg.hints] : undefined,
+      continuous: true,
+      onFinal: (t) => { void onWakeHeard(t); },
+      onError: (e) => {
+        // Сбой уже во время ожидания: соединение оборвалось, ключ
+        // отозвали, кончились средства. Молчать нельзя — иначе голос
+        // просто перестаёт отвечать без объяснений.
+        console.warn('[wake] сбой ожидания:', e);
+        wakeBroken = true;
+        void stopWake().then(() =>
+          hud.status('SERGEY AI', `Голос отключился\n${shortReason(e)}\nТап — говорить`));
+      },
+    });
 
-  try {
-    await wake.open();
-    bridge.onPcm((chunk) => wake?.push(chunk));
-    await setMic(true);
-    await hud.status('SERGEY AI', `Скажите «${cfg.wakeWord}» или тапните`);
-  } catch (e) {
-    console.warn('[wake] не удалось начать ожидание:', e);
-    await stopWake();
+    try {
+      await session.open();
+      wake = session;
+      bridge.onPcm((chunk) => wake?.push(chunk));
+      await setMic(true);
+      await hud.status('SERGEY AI', `Скажите «${cfg.wakeWord}» или тапните`);
+      return;
+    } catch (e) {
+      session.close();
+      console.warn(`[wake] попытка ${withHints ? 'с подсказками' : 'без подсказок'} не удалась:`, e);
+      if (!withHints) {
+        // Обе попытки провалились — говорим об этом прямо, а не
+        // оставляем человека гадать, почему голос не отвечает.
+        wake = null;
+        wakeBroken = true;
+        await setMic(false);
+        await hud.status('SERGEY AI', `Голос не включился\n${shortReason(e)}\nТап — говорить`);
+        return;
+      }
+    }
   }
 }
 
