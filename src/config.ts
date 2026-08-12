@@ -9,6 +9,14 @@ export interface Config {
   sttKey: string;
   /** Слова, которые STT путает: имена, термины, названия проектов. */
   hints: string[];
+  /**
+   * Поиск в интернете силами провайдера. Без него модель отвечает только
+   * тем, что знала на момент обучения: «лучшие рестораны» и любые
+   * свежие факты у неё взяться неоткуда.
+   */
+  webSearch: boolean;
+  /** Город для локальных запросов: «рестораны рядом», «аптека поблизости». */
+  city: string;
 }
 
 const DEFAULTS: Config = {
@@ -18,6 +26,8 @@ const DEFAULTS: Config = {
   baseUrl: 'https://api.anthropic.com',
   sttKey: '',
   hints: [],
+  webSearch: true,
+  city: '',
 };
 
 /**

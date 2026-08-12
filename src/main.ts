@@ -263,6 +263,12 @@ async function think(question: string) {
         else hud.stream(text).catch(() => {});
       },
       onConfirm: askConfirm,
+      onSearch: (q) => {
+        // Поиск добавляет несколько секунд. Без этой подсказки пауза
+        // выглядит как зависание, и человек тапает снова, обрывая ход.
+        hud.status('ИЩУ…', q.slice(0, 80)).catch(() => {});
+        streamed = false;
+      },
     }, abort.signal);
 
     if (!fsm.to('DISPLAYING')) return;

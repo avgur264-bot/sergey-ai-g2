@@ -10,6 +10,8 @@ const fields = {
   llmKey: $<HTMLInputElement>('llmKey'),
   model: $<HTMLInputElement>('model'),
   baseUrl: $<HTMLInputElement>('baseUrl'),
+  webSearch: $<HTMLInputElement>('webSearch'),
+  city: $<HTMLInputElement>('city'),
 };
 
 const statusEl = $('status');
@@ -30,6 +32,8 @@ async function init() {
   fields.llmKey.value = cfg.llmKey;
   fields.model.value = cfg.model;
   fields.baseUrl.value = cfg.baseUrl;
+  fields.webSearch.checked = cfg.webSearch;
+  fields.city.value = cfg.city;
 
   render(cfg);
 
@@ -63,6 +67,8 @@ async function init() {
       llmKey: fields.llmKey.value.trim(),
       model: fields.model.value.trim(),
       baseUrl: fields.baseUrl.value.trim().replace(/\/$/, ''),
+      webSearch: fields.webSearch.checked,
+      city: fields.city.value.trim(),
     };
 
     try {

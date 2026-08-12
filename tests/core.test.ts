@@ -442,3 +442,69 @@ test('история не начинается с висячего резуль�
     assert.equal(msgs[0].role, 'user', 'история всегда начинается с реплики пользователя');
   }
 });
+
+// ─── Веб-поиск: серверный инструмент провайдера ──────────────
+
+test('поиск включается и не путается с клиентскими инструментами', async () => {
+  const { AnthropicLlm } = await import('../src/agent/llm.ts');
+  let captured: any = null;
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+    };
+  }) as any;
+
+  try {
+    const llm = new AnthropicLlm('sk-ant-test');
+    await llm.complete({
+      system: 's',
+      messages: [{ role: 'user', content: 'лучшие рестораны' }],
+      tools: [{
+        name: 'timer_set', description: 'd', kind: 'read', transport: 'local', label: 'T',
+        schema: { type: 'object', properties: {} }, run: async () => ({ data: '' }),
+      }] as any,
+      webSearch: true,
+      city: 'Алматы',
+    });
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+
+  const search = captured.tools.find((t: any) => t.type === 'web_search_20250305');
+  assert.ok(search, 'серверный поиск должен уйти в запрос');
+  assert.equal(search.user_location.city, 'Алматы', 'город уточняет локальные запросы');
+  assert.ok(
+    captured.tools.some((t: any) => t.name === 'timer_set' && !t.type),
+    'клиентские инструменты остаются на месте',
+  );
+});
+
+test('без включённого поиска серверный инструмент не отправляется', async () => {
+  const { AnthropicLlm } = await import('../src/agent/llm.ts');
+  let captured: any = null;
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: any) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+    };
+  }) as any;
+
+  try {
+    const llm = new AnthropicLlm('sk-ant-test');
+    await llm.complete({ system: 's', messages: [{ role: 'user', content: 'привет' }], tools: [] });
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+
+  assert.ok(
+    !captured.tools.some((t: any) => t.type === 'web_search_20250305'),
+    'выключенный поиск не должен попадать в запрос и тратить деньги',
+  );
+});

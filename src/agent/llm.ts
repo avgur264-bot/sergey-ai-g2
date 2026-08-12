@@ -32,6 +32,12 @@ export interface Llm {
     tools: ToolSpec[];
     maxTokens?: number;
     onDelta?: (chunk: string) => void;
+    /** Модель пошла искать в интернете — можно показать это на экране. */
+    onSearch?: (query: string) => void;
+    /** Разрешить поиск в интернете (серверный инструмент провайдера). */
+    webSearch?: boolean;
+    /** Город пользователя — уточняет локальные запросы («рестораны рядом»). */
+    city?: string;
     signal?: AbortSignal;
   }): Promise<LlmReply>;
 }
@@ -53,6 +59,29 @@ export class AnthropicLlm implements Llm {
   }
 
   async complete(o: Parameters<Llm['complete']>[0]): Promise<LlmReply> {
+    // Инструменты клиента (таймер, память) и серверный поиск живут в
+    // одном массиве: поиск выполняет провайдер у себя, нам возвращается
+    // уже готовый ответ со ссылками. Отдельный ключ поисковика и обход
+    // CORS из WebView при таком подходе не нужны.
+    const tools: unknown[] = o.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.schema,
+    }));
+
+    if (o.webSearch) {
+      tools.push({
+        type: 'web_search_20250305',
+        name: 'web_search',
+        // Держим лимит низким: каждый поиск платный, а на HUD всё равно
+        // помещается короткий ответ, а не обзор десяти источников.
+        max_uses: 3,
+        ...(o.city
+          ? { user_location: { type: 'approximate', city: o.city } }
+          : {}),
+      });
+    }
+
     const body = {
       model: this.model,
       max_tokens: o.maxTokens ?? 200,
@@ -60,11 +89,7 @@ export class AnthropicLlm implements Llm {
       // Кэшируем системный промпт и схемы инструментов — они не меняются
       // между запросами и составляют почти весь вход. Экономия ~3x.
       system: [{ type: 'text', text: o.system, cache_control: { type: 'ephemeral' } }],
-      tools: o.tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.schema,
-      })),
+      tools,
       messages: toAnthropicMessages(o.messages),
     };
 
@@ -82,7 +107,7 @@ export class AnthropicLlm implements Llm {
     });
 
     if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
-    return parseAnthropicStream(res, o.onDelta);
+    return parseAnthropicStream(res, o.onDelta, o.onSearch);
   }
 }
 
@@ -98,13 +123,21 @@ function toAnthropicMessages(msgs: Msg[]) {
   });
 }
 
-async function parseAnthropicStream(res: Response, onDelta?: (s: string) => void): Promise<LlmReply> {
+async function parseAnthropicStream(
+  res: Response,
+  onDelta?: (s: string) => void,
+  onSearch?: (q: string) => void,
+): Promise<LlmReply> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
 
   let text = '';
   const toolCalls: ToolCall[] = [];
+  // Только НАШИ инструменты. Серверный поиск исполняет провайдер,
+  // возвращать его нам как вызов нельзя — иначе роутер станет искать
+  // несуществующий инструмент «web_search» в своём реестре.
   const partials = new Map<number, { id: string; name: string; json: string }>();
+  const serverPartials = new Map<number, string>();
   let buf = '';
 
   while (true) {
@@ -120,9 +153,18 @@ async function parseAnthropicStream(res: Response, onDelta?: (s: string) => void
       let ev: any;
       try { ev = JSON.parse(line.slice(6)); } catch { continue; }
 
-      if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-        partials.set(ev.index, { id: ev.content_block.id, name: ev.content_block.name, json: '' });
+      if (ev.type === 'content_block_start') {
+        const b = ev.content_block;
+        if (b?.type === 'tool_use') {
+          partials.set(ev.index, { id: b.id, name: b.name, json: '' });
+        }
+        if (b?.type === 'server_tool_use') {
+          // Аргументы поиска приходят потоком; накапливаем, чтобы
+          // показать человеку, что именно ищется.
+          serverPartials.set(ev.index, '');
+        }
       }
+
       if (ev.type === 'content_block_delta') {
         if (ev.delta?.type === 'text_delta') {
           text += ev.delta.text;
@@ -131,8 +173,11 @@ async function parseAnthropicStream(res: Response, onDelta?: (s: string) => void
         if (ev.delta?.type === 'input_json_delta') {
           const p = partials.get(ev.index);
           if (p) p.json += ev.delta.partial_json;
+          const s = serverPartials.get(ev.index);
+          if (s !== undefined) serverPartials.set(ev.index, s + ev.delta.partial_json);
         }
       }
+
       if (ev.type === 'content_block_stop') {
         const p = partials.get(ev.index);
         if (p) {
@@ -140,6 +185,14 @@ async function parseAnthropicStream(res: Response, onDelta?: (s: string) => void
           try { args = p.json ? JSON.parse(p.json) : {}; } catch { /* модель прислала мусор */ }
           toolCalls.push({ id: p.id, name: p.name, args });
           partials.delete(ev.index);
+        }
+        const s = serverPartials.get(ev.index);
+        if (s !== undefined) {
+          try {
+            const q = JSON.parse(s || '{}')?.query;
+            if (q) onSearch?.(String(q));
+          } catch { /* не критично: это только для индикации */ }
+          serverPartials.delete(ev.index);
         }
       }
     }

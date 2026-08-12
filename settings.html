@@ -60,6 +60,12 @@
     .lbl { display: block; font-size: 13px; font-weight: 500; margin-bottom: 5px; }
     .note { display: block; font-size: 12px; color: var(--muted); margin-top: 5px; }
 
+    /* Чекбокс в строку с подписью: общий стиль input растянул бы его
+       на всю ширину, как текстовое поле. */
+    label.row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+    label.row input[type="checkbox"] { width: 20px; height: 20px; flex: none; margin: 0; }
+    label.row .lbl { margin: 0; }
+
     input, select, textarea {
       width: 100%; padding: 11px 12px;
       border: 1px solid var(--rule); border-radius: 6px;
@@ -121,6 +127,25 @@
       <textarea id="hints" spellcheck="false"
         placeholder="Аня, Ануар, Кайрат, Джетбрейнс, Кубернетес"></textarea>
       <span class="note">Имена и термины, которые распознаётся неверно. Через запятую.</span>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Интернет</legend>
+
+    <label class="row">
+      <input id="webSearch" type="checkbox">
+      <span class="lbl">Искать в интернете</span>
+    </label>
+    <span class="note">
+      Нужно для свежих и местных вопросов: заведения, цены, расписания,
+      новости. Оплачивается отдельно, примерно $0.01 за поиск.
+    </span>
+
+    <label>
+      <span class="lbl">Город</span>
+      <input id="city" type="text" autocomplete="off" placeholder="Алматы">
+      <span class="note">Для запросов «рядом», «поблизости».</span>
     </label>
   </fieldset>
 
