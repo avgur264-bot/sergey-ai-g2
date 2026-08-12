@@ -188,20 +188,15 @@ export const placesTool: ToolSpec = {
 
     if (!items.length) return { data: 'ничего не найдено', direct: 'НИЧЕГО НЕ НАШЁЛ' };
 
-    const lines = items.map((i: any) => {
-      const where = i.address ? i.address : fmtDist(i.dist);
-      const tail = i.address ? `, ${fmtDist(i.dist)}` : '';
-      return `${i.name}\n${where}${tail}`;
-    });
-
-    // Модели отдаём чуть больше подробностей, чем помещается на экран:
-    // если она решит дополнить ответ, ей будет чем.
+    // Отдаём подробности модели и НЕ показываем список напрямую.
+    //
+    // Прямой показ был быстрее, но перескакивал через модель — а именно
+    // она добавляет к адресам рейтинги, найденные поиском. Без этого
+    // шага ответ выходил половинчатым: адрес есть, оценки нет.
     const forModel = items.map((i: any) =>
       [i.name, i.address, i.cuisine, i.hours, fmtDist(i.dist)].filter(Boolean).join(' · '));
 
-    // direct: показываем список сразу, без второго обращения к модели.
-    // Это и быстрее, и ровно тот конкретный ответ, который нужен.
-    return { data: forModel.join('\n'), direct: lines.join('\n') };
+    return { data: forModel.join('\n') };
   },
 };
 

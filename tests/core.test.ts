@@ -537,9 +537,9 @@ test('places_near отдаёт готовый список с расстояни
       { category: 'ресторан' },
       { cfg: { city: 'Алматы' }, signal: new AbortController().signal, bridge: {} as any },
     );
-    assert.ok(!r.direct!.includes('Безымянный'), 'безымянные объекты отбрасываются');
-    assert.match(r.direct!, /^Близко/, 'ближайшее — первым');
-    assert.match(r.direct!, /м|км/, 'расстояние показано');
+    assert.match(r.data, /^Близко/, 'ближайшее — первым');
+    assert.match(r.data, /м|км/, 'расстояние показано');
+    assert.ok(!r.direct, 'список идёт через модель, чтобы она добавила рейтинги');
   } finally {
     globalThis.fetch = prevFetch;
   }
@@ -590,8 +590,8 @@ test('город из вопроса важнее города из настро
       asked[0].includes('%D0%A1%D0%B0%D0%BC') || asked[0].includes('Самарканд'),
       'геокодировать надо город из вопроса, а не из настроек',
     );
-    assert.match(r.direct!, /Плов Центр/, 'уточнение блюда должно фильтровать список');
-    assert.ok(!r.direct!.includes('Пиццерия'), 'неподходящее отсеивается');
+    assert.match(r.data, /Плов Центр/, 'уточнение блюда должно фильтровать список');
+    assert.ok(!r.data.includes('Пиццерия'), 'неподходящее отсеивается');
   } finally {
     globalThis.fetch = prevFetch;
   }
@@ -617,7 +617,7 @@ test('если по блюду ничего нет, показываем бли�
       { category: 'ресторан', location: 'Самарканд', keyword: 'суши' },
       { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
     );
-    assert.match(r.direct!, /Кафе Дружба/, 'пустой экран хуже, чем близкие варианты');
+    assert.match(r.data, /Кафе Дружба/, 'пустой экран хуже, чем близкие варианты');
   } finally {
     globalThis.fetch = prevFetch;
   }
@@ -770,13 +770,38 @@ test('адрес попадает в ответ и место с адресом 
       { category: 'ресторан', location: 'Самарканд' },
       { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
     );
-    assert.match(r.direct!, /ул\. Регистан, 12/, 'адрес должен быть показан');
+    assert.match(r.data, /ул\. Регистан, 12/, 'адрес должен быть показан');
     assert.ok(
-      r.direct!.indexOf('Плов Центр') < r.direct!.indexOf('Без адреса'),
+      r.data.indexOf('Плов Центр') < r.data.indexOf('Без адреса'),
       'место с адресом полезнее и идёт выше',
     );
     assert.match(r.data, /uzbek/, 'модели уходят подробности');
   } finally {
     globalThis.fetch = prevFetch;
   }
+});
+
+// ─── Никаких отговорок ───────────────────────────────────────
+
+test('инструкция прямо запрещает отвечать отговорками', async () => {
+  // Ассистент, который вместо ответа объясняет свои ограничения,
+  // бесполезен. Правило легко потерять при правке промпта — держим
+  // его под проверкой.
+  const { SYSTEM_PROMPT } = await import('../src/agent/router.ts');
+  // Перенос строки внутри промпта разрывает фразу — сверяем по
+  // схлопнутым пробелам, иначе проверка ловит форматирование, а не смысл.
+  const flat = SYSTEM_PROMPT.replace(/\s+/g, ' ');
+  assert.match(flat, /нет доступа/, 'запрет должен быть назван явно');
+  assert.match(flat, /Никаких отговорок/, 'правило должно стоять первым');
+  assert.match(SYSTEM_PROMPT, /ИЩИ|поиск/i, 'вместо отговорки — поиск');
+  assert.ok(
+    !/Не знаешь — скажи/.test(SYSTEM_PROMPT),
+    'прежняя формулировка поощряла ответ «не знаю»',
+  );
+});
+
+test('поиск включён по умолчанию — без него нет рейтингов', async () => {
+  const { loadConfig } = await import('../src/config.ts');
+  const cfg = await loadConfig({ async get() { return null; } } as any);
+  assert.equal(cfg.webSearch, true);
 });

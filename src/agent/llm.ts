@@ -82,9 +82,10 @@ export class AnthropicLlm implements Llm {
       tools.push({
         type: 'web_search_20250305',
         name: 'web_search',
-        // Держим лимит низким: каждый поиск платный, а на HUD всё равно
-        // помещается короткий ответ, а не обзор десяти источников.
-        max_uses: 3,
+        // Двух-трёх поисков хватает, чтобы найти места и их рейтинги;
+        // запас до пяти нужен, когда с первого раза не нашлось и модель
+        // переформулирует запрос. Пустой ответ дороже лишнего цента.
+        max_uses: 5,
         ...(o.city
           ? { user_location: { type: 'approximate', city: o.city } }
           : {}),
@@ -93,7 +94,7 @@ export class AnthropicLlm implements Llm {
 
     const body = {
       model: this.model,
-      max_tokens: o.maxTokens ?? 200,
+      max_tokens: o.maxTokens ?? 400,
       stream: true,
       // Кэшируем системный промпт и схемы инструментов — они не меняются
       // между запросами и составляют почти весь вход. Экономия ~3x.
@@ -264,7 +265,7 @@ export class OpenAiLlm implements Llm {
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: o.maxTokens ?? 200,
+        max_tokens: o.maxTokens ?? 400,
         messages: [
           { role: 'system', content: o.system },
           ...o.messages.map((m) => {
