@@ -145,6 +145,9 @@ export { searchTool, telegramTool, noteAddTool, noteListTool } from './direct.ts
 export { calendarListTool, calendarCreateTool } from './calendar.ts';
 
 import { noteAddTool, noteListTool } from './direct.ts';
+import { placesTool, wikiTool } from './free.ts';
+
+export { placesTool, wikiTool } from './free.ts';
 
 /**
  * Каждый инструмент здесь — это входные токены в КАЖДОМ запросе.
@@ -165,4 +168,6 @@ export const defaultTools = [
   weatherTool,
   noteAddTool,
   noteListTool,
+  placesTool,
+  wikiTool,
 ];

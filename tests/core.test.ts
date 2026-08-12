@@ -508,3 +508,51 @@ test('без включённого поиска серверный инстру
     'выключенный поиск не должен попадать в запрос и тратить деньги',
   );
 });
+
+// ─── Бесплатные источники ────────────────────────────────────
+
+test('places_near отдаёт готовый список с расстояниями', async () => {
+  const { placesTool } = await import('../src/agent/tools/free.ts');
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any) => {
+    const u = String(url);
+    if (u.includes('nominatim')) {
+      return { ok: true, json: async () => ([{ lat: '43.238', lon: '76.889' }]) };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        elements: [
+          { lat: 43.2385, lon: 76.8895, tags: { name: 'Далеко', cuisine: 'pizza' } },
+          { lat: 43.2381, lon: 76.8891, tags: { name: 'Близко' } },
+          { lat: 43.2400, lon: 76.8900, tags: {} },
+        ],
+      }),
+    };
+  }) as any;
+
+  try {
+    const r = await placesTool.run(
+      { category: 'ресторан' },
+      { cfg: { city: 'Алматы' }, signal: new AbortController().signal, bridge: {} as any },
+    );
+    const lines = r.direct!.split('\n');
+    assert.equal(lines.length, 2, 'безымянные объекты отбрасываются');
+    assert.match(lines[0], /^Близко/, 'ближайшее — первым');
+    assert.match(r.direct!, /м|км/, 'расстояние показано');
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test('без города и геолокации places_near говорит, что делать', async () => {
+  const { placesTool } = await import('../src/agent/tools/free.ts');
+  await assert.rejects(
+    () => placesTool.run(
+      { category: 'кафе' },
+      { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
+    ),
+    /город/i,
+  );
+});
