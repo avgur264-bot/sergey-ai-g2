@@ -296,15 +296,33 @@ let instance: Bridge | null = null;
 
 export async function getBridge(): Promise<Bridge> {
   if (instance) return instance;
+
+  // ⚠️ КЛЮЧЕВОЙ МОМЕНТ, подтверждён эмпирически (перехватом обращений к window):
+  // EvenAppBridge из SDK сам инициализируется при импорте модуля и сразу
+  // помечает себя готовым (_ready = true) — ДАЖЕ в обычном браузере без
+  // реальных очков. waitForEvenAppBridge() поэтому всегда резолвится,
+  // и полагаться на неё для выбора мока нельзя — она не отличает
+  // Even App от простого Safari.
+  //
+  // Настоящий сигнал — нативный канал, который Even App (написан на
+  // Flutter) внедряет в WebView: window.flutter_inappwebview.callHandler.
+  // Без него SDK не бросает исключение, а молча логирует
+  // "Flutter handler not available" и ничего не делает — поэтому раньше
+  // код выбирал боевой SdkBridge и просто ничего не рисовал на экране.
+  const hasNativeHost =
+    typeof (window as any).flutter_inappwebview?.callHandler === 'function';
+
+  if (!hasNativeHost) {
+    console.warn('[bridge] flutter_inappwebview не найден — работаю в моке для браузера');
+    instance = new MockBridge();
+    return instance;
+  }
+
   try {
-    const sdk = await Promise.race([
-      waitForEvenAppBridge(),
-      new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error('мост не появился за 3 с')), 3000)),
-    ]);
+    const sdk = await waitForEvenAppBridge();
     instance = new SdkBridge(sdk);
   } catch (e) {
-    console.warn('[bridge] Even App недоступен, работаю в моке:', e);
+    console.warn('[bridge] нативный хост есть, но SDK не инициализировался:', e);
     instance = new MockBridge();
   }
   return instance;
