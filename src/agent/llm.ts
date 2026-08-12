@@ -12,6 +12,15 @@ export interface Msg {
   content: string;
   toolCallId?: string;
   toolName?: string;
+  /**
+   * Вызовы инструментов, сделанные моделью в этом ходе.
+   *
+   * Хранить обязательно: результат инструмента ссылается на вызов по
+   * идентификатору, и если самого вызова в истории нет, провайдер
+   * отвергает запрос целиком. Раньше ход записывался просто текстом,
+   * и любой инструмент ломал следующий шаг с ошибкой 400.
+   */
+  toolCalls?: ToolCall[];
 }
 
 export interface ToolCall {
@@ -112,15 +121,44 @@ export class AnthropicLlm implements Llm {
 }
 
 function toAnthropicMessages(msgs: Msg[]) {
-  return msgs.map((m) => {
+  const out: any[] = [];
+
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+
     if (m.role === 'tool') {
-      return {
-        role: 'user' as const,
-        content: [{ type: 'tool_result', tool_use_id: m.toolCallId, content: m.content }],
-      };
+      // Все результаты одного хода провайдер ждёт в ОДНОЙ реплике
+      // пользователя. Собираем подряд идущие вместе.
+      const results: any[] = [];
+      while (i < msgs.length && msgs[i].role === 'tool') {
+        results.push({
+          type: 'tool_result',
+          tool_use_id: msgs[i].toolCallId,
+          content: msgs[i].content,
+        });
+        i++;
+      }
+      i--;
+      out.push({ role: 'user', content: results });
+      continue;
     }
-    return { role: m.role, content: m.content };
-  });
+
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      // Текст может отсутствовать, если модель сразу пошла за
+      // инструментом; пустой текстовый блок отправлять нельзя.
+      const blocks: any[] = [];
+      if (m.content.trim()) blocks.push({ type: 'text', text: m.content });
+      for (const c of m.toolCalls) {
+        blocks.push({ type: 'tool_use', id: c.id, name: c.name, input: c.args ?? {} });
+      }
+      out.push({ role: 'assistant', content: blocks });
+      continue;
+    }
+
+    out.push({ role: m.role, content: m.content });
+  }
+
+  return out;
 }
 
 async function parseAnthropicStream(
@@ -229,10 +267,25 @@ export class OpenAiLlm implements Llm {
         max_tokens: o.maxTokens ?? 200,
         messages: [
           { role: 'system', content: o.system },
-          ...o.messages.map((m) =>
-            m.role === 'tool'
-              ? { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
-              : { role: m.role, content: m.content }),
+          ...o.messages.map((m) => {
+            if (m.role === 'tool') {
+              return { role: 'tool', tool_call_id: m.toolCallId, content: m.content };
+            }
+            if (m.role === 'assistant' && m.toolCalls?.length) {
+              // Та же причина, что и у Anthropic: без самого вызова
+              // результат ссылается в пустоту и запрос отвергается.
+              return {
+                role: 'assistant',
+                content: m.content || null,
+                tool_calls: m.toolCalls.map((c) => ({
+                  id: c.id,
+                  type: 'function',
+                  function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) },
+                })),
+              };
+            }
+            return { role: m.role, content: m.content };
+          }),
         ],
         tools: o.tools.map((t) => ({
           type: 'function',

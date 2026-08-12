@@ -623,3 +623,96 @@ test('если по блюду ничего нет, показываем бли�
     globalThis.fetch = prevFetch;
   }
 });
+
+// ─── Вызов инструмента в истории ─────────────────────────────
+
+test('ход с инструментом уходит вместе с самим вызовом, а не только текстом', async () => {
+  // РЕАЛЬНЫЙ БАГ: ответ модели с вызовом инструмента записывался в
+  // историю как обычный текст. Следующий запрос нёс результат
+  // инструмента со ссылкой на вызов, которого в диалоге уже нет,
+  // и сервер отвечал 400. Ломалось всё, что использует инструменты:
+  // поиск мест, погода, таймер.
+  const { AnthropicLlm } = await import('../src/agent/llm.ts');
+  let captured: any = null;
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (_u: any, init: any) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+    };
+  }) as any;
+
+  try {
+    const llm = new AnthropicLlm('sk-ant-test');
+    await llm.complete({
+      system: 's',
+      tools: [],
+      messages: [
+        { role: 'user', content: 'где поесть' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'toolu_1', name: 'places_near', args: { category: 'ресторан' } }],
+        },
+        { role: 'tool', content: 'Кафе — 200 м', toolCallId: 'toolu_1', toolName: 'places_near' },
+      ],
+    });
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+
+  const assistant = captured.messages[1];
+  assert.equal(assistant.role, 'assistant');
+  assert.ok(Array.isArray(assistant.content), 'ход модели должен быть блоками, а не строкой');
+
+  const use = assistant.content.find((b: any) => b.type === 'tool_use');
+  assert.ok(use, 'вызов инструмента обязан присутствовать в истории');
+  assert.equal(use.id, 'toolu_1');
+  assert.equal(use.name, 'places_near');
+
+  const result = captured.messages[2].content.find((b: any) => b.type === 'tool_result');
+  assert.equal(result.tool_use_id, 'toolu_1', 'результат ссылается на существующий вызов');
+});
+
+test('несколько результатов подряд собираются в одну реплику', async () => {
+  // Провайдер ждёт все результаты одного хода в одном сообщении.
+  const { AnthropicLlm } = await import('../src/agent/llm.ts');
+  let captured: any = null;
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (_u: any, init: any) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+    };
+  }) as any;
+
+  try {
+    const llm = new AnthropicLlm('sk-ant-test');
+    await llm.complete({
+      system: 's',
+      tools: [],
+      messages: [
+        { role: 'user', content: 'вопрос' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            { id: 'a', name: 't1', args: {} },
+            { id: 'b', name: 't2', args: {} },
+          ],
+        },
+        { role: 'tool', content: 'раз', toolCallId: 'a', toolName: 't1' },
+        { role: 'tool', content: 'два', toolCallId: 'b', toolName: 't2' },
+      ],
+    });
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+
+  assert.equal(captured.messages.length, 3, 'два результата — одна реплика пользователя');
+  assert.equal(captured.messages[2].content.length, 2);
+});

@@ -184,7 +184,11 @@ export class Router {
 
     // 3. Цикл инструментов. Ограничение в 3 шага — защита от зацикливания.
     for (let step = 0; step < 3 && reply.toolCalls.length; step++) {
-      this.history.push({ role: 'assistant', content: reply.text || '(вызов инструмента)' });
+      this.history.push({
+        role: 'assistant',
+        content: reply.text,
+        toolCalls: reply.toolCalls,
+      });
 
       for (const call of reply.toolCalls) {
         const out = await this.runCall(call, cb, signal);
