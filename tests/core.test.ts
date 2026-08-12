@@ -526,7 +526,7 @@ test('places_near отдаёт готовый список с расстояни
         elements: [
           { lat: 43.2385, lon: 76.8895, tags: { name: 'Далеко', cuisine: 'pizza' } },
           { lat: 43.2381, lon: 76.8891, tags: { name: 'Близко' } },
-          { lat: 43.2400, lon: 76.8900, tags: {} },
+          { lat: 43.2400, lon: 76.8900, tags: { amenity: 'restaurant' } },
         ],
       }),
     };
@@ -537,9 +537,8 @@ test('places_near отдаёт готовый список с расстояни
       { category: 'ресторан' },
       { cfg: { city: 'Алматы' }, signal: new AbortController().signal, bridge: {} as any },
     );
-    const lines = r.direct!.split('\n');
-    assert.equal(lines.length, 2, 'безымянные объекты отбрасываются');
-    assert.match(lines[0], /^Близко/, 'ближайшее — первым');
+    assert.ok(!r.direct!.includes('Безымянный'), 'безымянные объекты отбрасываются');
+    assert.match(r.direct!, /^Близко/, 'ближайшее — первым');
     assert.match(r.direct!, /м|км/, 'расстояние показано');
   } finally {
     globalThis.fetch = prevFetch;
@@ -735,4 +734,49 @@ test('подпись стоит в заголовке и не отнимает �
   assert.equal(page.title, BRAND, 'подпись — в заголовке');
   assert.equal(page.body, answer, 'тело содержит только ответ, без подписи');
   hud.stopAuto();
+});
+
+test('адрес попадает в ответ и место с адресом идёт выше', async () => {
+  // Рекомендация без адреса бесполезна: до неё нельзя дойти.
+  const { placesTool } = await import('../src/agent/tools/free.ts');
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any) => {
+    if (String(url).includes('nominatim')) {
+      return { ok: true, json: async () => ([{ lat: '39.65', lon: '66.96' }]) };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        elements: [
+          // Ближе, но без адреса.
+          { lat: 39.6501, lon: 66.9601, tags: { name: 'Без адреса' } },
+          // Дальше, зато с адресом.
+          {
+            lat: 39.6600, lon: 66.9700,
+            tags: {
+              name: 'Плов Центр',
+              'addr:street': 'ул. Регистан',
+              'addr:housenumber': '12',
+              cuisine: 'uzbek',
+            },
+          },
+        ],
+      }),
+    };
+  }) as any;
+
+  try {
+    const r = await placesTool.run(
+      { category: 'ресторан', location: 'Самарканд' },
+      { cfg: {}, signal: new AbortController().signal, bridge: {} as any },
+    );
+    assert.match(r.direct!, /ул\. Регистан, 12/, 'адрес должен быть показан');
+    assert.ok(
+      r.direct!.indexOf('Плов Центр') < r.direct!.indexOf('Без адреса'),
+      'место с адресом полезнее и идёт выше',
+    );
+    assert.match(r.data, /uzbek/, 'модели уходят подробности');
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
 });

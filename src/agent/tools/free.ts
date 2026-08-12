@@ -94,7 +94,8 @@ export const placesTool: ToolSpec = {
   name: 'places_near',
   description:
     'Найти заведения: рестораны, кафе, бары, аптеки, банкоматы, заправки, '
-    + 'магазины, отели, парки. Если пользователь назвал город или район — '
+    + 'магазины, отели, парки. Возвращает название, адрес и расстояние. '
+    + 'Если пользователь назвал город или район — '
     + 'обязательно передай его в location, иначе поиск пойдёт вокруг '
     + 'текущего места. Если названо блюдо или кухня («плов», «пицца», '
     + '«суши») — передай это в keyword. Рейтингов и отзывов нет.',
@@ -153,9 +154,12 @@ export const placesTool: ToolSpec = {
         const elat = e.lat ?? e.center?.lat;
         const elon = e.lon ?? e.center?.lon;
         if (typeof elat !== 'number' || typeof elon !== 'number') return null;
+        const t = e.tags ?? {};
         return {
-          name: String(e.tags?.name ?? '').slice(0, 40),
-          cuisine: e.tags?.cuisine ? String(e.tags.cuisine).split(';')[0] : '',
+          name: String(t.name ?? '').slice(0, 40),
+          cuisine: t.cuisine ? String(t.cuisine).split(';')[0] : '',
+          address: formatAddress(t),
+          hours: t.opening_hours ? String(t.opening_hours).slice(0, 24) : '',
           dist: Math.round(haversine(lat, lon, elat, elon)),
         };
       })
@@ -172,17 +176,45 @@ export const placesTool: ToolSpec = {
       if (matched.length) items = matched;
     }
 
-    items = items.sort((a: any, b: any) => a.dist - b.dist).slice(0, 5);
+    // Место с адресом полезнее безымянной точки на карте: до него можно
+    // дойти. При прочих равных показываем такие выше, а уже потом
+    // сортируем по расстоянию.
+    items = items
+      .sort((a: any, b: any) => {
+        const byAddr = Number(Boolean(b.address)) - Number(Boolean(a.address));
+        return byAddr !== 0 ? byAddr : a.dist - b.dist;
+      })
+      .slice(0, 4);
+
     if (!items.length) return { data: 'ничего не найдено', direct: 'НИЧЕГО НЕ НАШЁЛ' };
 
-    const lines = items.map((i: any) =>
-      `${i.name} — ${fmtDist(i.dist)}${i.cuisine ? `, ${i.cuisine}` : ''}`);
+    const lines = items.map((i: any) => {
+      const where = i.address ? i.address : fmtDist(i.dist);
+      const tail = i.address ? `, ${fmtDist(i.dist)}` : '';
+      return `${i.name}\n${where}${tail}`;
+    });
+
+    // Модели отдаём чуть больше подробностей, чем помещается на экран:
+    // если она решит дополнить ответ, ей будет чем.
+    const forModel = items.map((i: any) =>
+      [i.name, i.address, i.cuisine, i.hours, fmtDist(i.dist)].filter(Boolean).join(' · '));
 
     // direct: показываем список сразу, без второго обращения к модели.
     // Это и быстрее, и ровно тот конкретный ответ, который нужен.
-    return { data: lines.join('\n'), direct: lines.join('\n') };
+    return { data: forModel.join('\n'), direct: lines.join('\n') };
   },
 };
+
+/** Улица и дом из тегов OSM. Без города — он и так известен из вопроса. */
+function formatAddress(t: any): string {
+  const street = t['addr:street'] ? String(t['addr:street']) : '';
+  const house = t['addr:housenumber'] ? String(t['addr:housenumber']) : '';
+  if (street && house) return `${street}, ${house}`;
+  if (street) return street;
+  // Некоторые объекты несут только общий адресный тег.
+  if (t['addr:full']) return String(t['addr:full']).slice(0, 60);
+  return '';
+}
 
 function fmtDist(m: number) {
   return m < 1000 ? `${m} м` : `${(m / 1000).toFixed(1)} км`;
