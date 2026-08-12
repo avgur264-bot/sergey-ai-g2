@@ -81,9 +81,6 @@ export class Hud {
 
   /** Полная замена экрана. Даёт вспышку — не использовать для стриминга. */
   async show(page: HudPage) {
-    // Любой новый экран отменяет автопрокрутку прошлого ответа: иначе
-    // отложенный таймер перерисует «СЛУШАЮ» страницей старого текста.
-    this.stopAuto();
     this.pages = [];
     this.title = page.title;
     const wasCreated = this.created;
@@ -110,7 +107,6 @@ export class Hud {
     this.pages = paginate(text);
     this.index = 0;
     await this.render();
-    this.scheduleAuto();
   }
 
   async next() {
@@ -121,41 +117,35 @@ export class Hud {
     if (this.index > 0) { this.index--; await this.render(); }
   }
 
-  /** Листание руками: отменяет автопрокрутку, дальше человек сам. */
-  async nextManual() { this.stopAuto(); await this.next(); }
-  async prevManual() { this.stopAuto(); await this.prev(); }
+  /**
+   * Листание по кругу: с последней страницы попадаем на первую, с
+   * первой — на последнюю. Так из любого места ответа можно дойти
+   * до любого другого, не упираясь в край.
+   */
+  async cycleNext() {
+    if (!this.pages.length) return;
+    this.index = (this.index + 1) % this.pages.length;
+    await this.render();
+  }
+
+  async cyclePrev() {
+    if (!this.pages.length) return;
+    this.index = (this.index - 1 + this.pages.length) % this.pages.length;
+    await this.render();
+  }
 
   get hasPages() { return this.pages.length > 0; }
   get isMultiPage() { return this.pages.length > 1; }
   get atLastPage() { return this.index >= this.pages.length - 1; }
 
   /**
-   * Автопролистывание длинного ответа.
+   * Автопролистывания намеренно нет.
    *
-   * Полагаться только на свайп нельзя: если жест не долетит, человек
-   * увидит первую страницу и решит, что ответ обрезан. Штатный Even AI
-   * прокручивает текст сам — здесь тот же принцип. Ручные жесты
-   * продолжают работать и просто отменяют автопрокрутку.
+   * Оно было, и оказалось вредным: пока человек читает первую страницу,
+   * таймер уводил его в конец ответа, а на последней странице тап уже
+   * начинает новый вопрос — вернуться было некуда. Скорость чтения
+   * задаёт человек, а не таймер.
    */
-  private autoTimer?: ReturnType<typeof setTimeout>;
-
-  private scheduleAuto() {
-    this.stopAuto();
-    if (this.atLastPage) return;
-
-    // Время на страницу — по длине текста, но в разумных пределах:
-    // читать HUD быстрее, чем книгу, и медленнее, чем заголовок.
-    const chars = this.pages[this.index]?.length ?? 0;
-    const ms = Math.min(9000, Math.max(3500, chars * 55));
-
-    this.autoTimer = setTimeout(() => {
-      void this.next().then(() => this.scheduleAuto());
-    }, ms);
-  }
-
-  stopAuto() {
-    if (this.autoTimer) { clearTimeout(this.autoTimer); this.autoTimer = undefined; }
-  }
 
   private async render() {
     // Подвал не только нумерует страницы, но и говорит, что делать
@@ -164,7 +154,7 @@ export class Hud {
     // что ответ продолжается, ни что разговор можно закрыть голосом.
     const footer = this.isMultiPage
       ? (this.atLastPage
-          ? `${this.index + 1}/${this.pages.length} · тап — спросить · «хватит» — закрыть`
+          ? `${this.index + 1}/${this.pages.length} · свайп — листать · тап — спросить`
           : `${this.index + 1}/${this.pages.length} · тап — дальше`)
       : 'тап — спросить · «хватит» — закрыть';
     const page = { title: this.title, body: this.pages[this.index] ?? '', footer };

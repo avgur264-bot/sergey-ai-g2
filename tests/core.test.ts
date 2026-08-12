@@ -338,7 +338,6 @@ test('atLastPage корректен для одностраничного и м�
   await hud.result('ОТВЕТ', 'Предложение. '.repeat(60));
   assert.equal(hud.isMultiPage, true);
   assert.equal(hud.atLastPage, false, 'на первой из нескольких — не последняя');
-  hud.stopAuto();
 });
 
 test('подвал подсказывает, что тап листает дальше', async () => {
@@ -352,7 +351,6 @@ test('подвал подсказывает, что тап листает дал
   const footer = (last!.args[0] as any).footer as string;
   assert.match(footer, /1\/\d+/, 'должен быть номер страницы');
   assert.match(footer, /дальше/, 'должна быть подсказка про тап');
-  hud.stopAuto();
 });
 
 test('новый экран отменяет автопрокрутку прошлого ответа', async () => {
@@ -733,7 +731,6 @@ test('подпись стоит в заголовке и не отнимает �
 
   assert.equal(page.title, BRAND, 'подпись — в заголовке');
   assert.equal(page.body, answer, 'тело содержит только ответ, без подписи');
-  hud.stopAuto();
 });
 
 test('адрес попадает в ответ и место с адресом идёт выше', async () => {
@@ -830,4 +827,49 @@ test('слова завершения закрывают разговор, по�
   assert.equal(bye('хватит ли мне денег на билет'), false);
   assert.equal(bye('спасибо скажи по-японски'), false);
   assert.equal(bye('всё о фотосинтезе'), false);
+});
+
+// ─── Листание по кругу ───────────────────────────────────────
+
+test('листание не упирается в края: с конца в начало и обратно', async () => {
+  // Раньше автопрокрутка уводила в конец ответа, а с последней
+  // страницы тап начинал новый вопрос — вернуться было некуда.
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  await hud.result('ОТВЕТ', 'Предложение раз. '.repeat(40));
+  const total = (() => {
+    const last = [...bridge.calls].reverse()
+      .find((c) => c.method === 'createPage' || c.method === 'rebuildPage');
+    return Number(((last!.args[0] as any).footer as string).split('/')[1].split(' ')[0]);
+  })();
+  assert.ok(total > 2, 'нужен многостраничный ответ');
+
+  const pageNow = () => {
+    const last = [...bridge.calls].reverse()
+      .find((c) => c.method === 'createPage' || c.method === 'rebuildPage');
+    return Number(((last!.args[0] as any).footer as string).split('/')[0]);
+  };
+
+  assert.equal(pageNow(), 1);
+
+  // С первой страницы назад — попадаем в конец.
+  await hud.cyclePrev();
+  assert.equal(pageNow(), total, 'с первой страницы назад — в конец');
+
+  // С последней вперёд — снова в начало.
+  await hud.cycleNext();
+  assert.equal(pageNow(), 1, 'с последней вперёд — в начало');
+});
+
+test('ответ не уезжает сам: без действий страница остаётся первой', async () => {
+  const { Hud } = await import('../src/hud/renderer.ts');
+  const bridge = new FakeBridge();
+  const hud = new Hud(bridge as any);
+
+  await hud.result('ОТВЕТ', 'Предложение раз. '.repeat(40));
+  const before = bridge.calls.length;
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(bridge.calls.length, before, 'никакой таймер не должен листать за человека');
 });

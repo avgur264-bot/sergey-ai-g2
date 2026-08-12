@@ -132,7 +132,7 @@ async function onGesture(g: Gesture) {
         // Пока ответ не дочитан, тап листает его дальше. Начинать новый
         // вопрос с середины чужого ответа человек почти никогда не хочет,
         // а свайп может не долететь — тап надёжнее.
-        await hud.nextManual();
+        await hud.cycleNext();
       }
       else if (fsm.state === 'IDLE' || fsm.state === 'DISPLAYING') await startListening();
       else if (fsm.state === 'LISTENING') stt?.finish();       // ручное завершение
@@ -140,12 +140,15 @@ async function onGesture(g: Gesture) {
       else if (fsm.state === 'ERROR') fsm.force('IDLE');       // «Тап — повторить»
       break;
 
+    // Свайпы листают по кругу в обе стороны: с последней страницы
+    // можно вернуться в начало, с первой — сразу в конец. Ни один край
+    // не становится тупиком.
     case 'scroll_up':
-      if (fsm.state === 'DISPLAYING') await hud.prevManual();
+      if (fsm.state === 'DISPLAYING') await hud.cyclePrev();
       break;
 
     case 'scroll_down':
-      if (fsm.state === 'DISPLAYING') await hud.nextManual();
+      if (fsm.state === 'DISPLAYING') await hud.cycleNext();
       break;
   }
 }
