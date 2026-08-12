@@ -65,10 +65,28 @@ async function init() {
       baseUrl: fields.baseUrl.value.trim().replace(/\/$/, ''),
     };
 
-    await saveConfig(bridge, next);
-    render(next as Config);
+    try {
+      await saveConfig(bridge, next);
 
-    savedEl.textContent = 'Сохранено. Перезапустите приложение на очках.';
+      // Перечитываем записанное: сообщать «Сохранено», не убедившись,
+      // что запись прошла, — худший вид вранья в настройках. Человек
+      // уходит уверенным, а работает старый ключ.
+      const check = await loadConfig(bridge);
+      if (check.llmKey !== next.llmKey || check.sttKey !== next.sttKey) {
+        savedEl.style.color = 'var(--alert)';
+        savedEl.textContent = 'Не удалось сохранить — попробуйте ещё раз.';
+        return;
+      }
+
+      render(check);
+      savedEl.style.color = '';
+      savedEl.textContent = 'Сохранено.';
+    } catch (e) {
+      console.error(e);
+      savedEl.style.color = 'var(--alert)';
+      savedEl.textContent = 'Ошибка сохранения. Попробуйте ещё раз.';
+      return;
+    }
     setTimeout(() => { savedEl.textContent = ''; }, 4000);
   });
 }

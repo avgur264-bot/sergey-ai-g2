@@ -37,22 +37,61 @@ async function main() {
     return;
   }
 
-  const llm: Llm = cfg.provider === 'openai'
-    ? new OpenAiLlm(cfg.llmKey, cfg.model, cfg.baseUrl)
-    : new AnthropicLlm(cfg.llmKey, cfg.model, cfg.baseUrl);
-
-  const registry = new Registry().add(...defaultTools);
-  router = new Router(llm, registry, bridge, cfg as any);
+  router = buildRouter();
 
   bridge.onGesture(onGesture);
   bridge.onLifecycle(onLifecycle);
   fsm.onChange(onStateChange);
+
+  // Возврат со страницы настроек не перезапускает приложение: WebView
+  // отдаёт эту страницу из кэша, main() повторно не выполняется, и в
+  // памяти остаются ключи, прочитанные при первом открытии. Человек
+  // правит ключ, жмёт «Сохранить», возвращается — а работает всё ещё
+  // старый. Поэтому перечитываем конфиг каждый раз, когда страница
+  // снова становится видимой.
+  const refresh = () => { void reloadConfig(); };
+  window.addEventListener('pageshow', refresh);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refresh();
+  });
 
   window.addEventListener('sergey:timer', (e: any) => {
     hud.status('ТАЙМЕР', e.detail?.name ?? 'Время вышло');
   });
 
   await hud.boot({ title: 'SERGEY AI', body: 'Тап — говорить', footer: '' });
+}
+
+/** Подхватывает изменённые настройки без перезапуска приложения. */
+async function reloadConfig() {
+  const next = await loadConfig(bridge);
+  const changed =
+    next.llmKey !== cfg.llmKey ||
+    next.sttKey !== cfg.sttKey ||
+    next.provider !== cfg.provider ||
+    next.model !== cfg.model ||
+    next.baseUrl !== cfg.baseUrl;
+
+  cfg = next;
+  if (!changed) return;
+
+  if (!cfg.sttKey || !cfg.llmKey) {
+    await hud.status('SERGEY AI', 'Откройте настройки на телефоне и введите ключи API.');
+    return;
+  }
+
+  router = buildRouter();
+  if (fsm.state === 'IDLE' || fsm.state === 'ERROR') {
+    fsm.force('IDLE');
+  }
+}
+
+function buildRouter(): Router {
+  const llm: Llm = cfg.provider === 'openai'
+    ? new OpenAiLlm(cfg.llmKey, cfg.model, cfg.baseUrl)
+    : new AnthropicLlm(cfg.llmKey, cfg.model, cfg.baseUrl);
+  const registry = new Registry().add(...defaultTools);
+  return new Router(llm, registry, bridge, cfg as any);
 }
 
 // ─────────────────────────────────────────────────────────────
