@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sergey AI</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100dvh;
+      display: grid; place-items: center;
+      background: #0a0c0a;
+      font: 400 14px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+      color: #4a5a4a;
+    }
+    /* Превью HUD в реальной пропорции 576×288. На очках не видно —
+       это только для отладки в браузере и симуляторе. */
+    #hud-preview {
+      width: min(576px, 92vw); aspect-ratio: 2 / 1;
+      padding: 24px;
+      display: flex; flex-direction: column; gap: 12px;
+      background: #000;
+      border: 1px solid #1b2a1b;
+      color: #7dd87d;
+      font-size: clamp(15px, 3.4vw, 22px);
+    }
+    .hud-title { font-weight: 600; letter-spacing: .08em; }
+    .hud-body  { flex: 1; white-space: pre-wrap; }
+    .hud-footer { font-size: .7em; opacity: .55; text-align: right; }
+    .hint { margin-top: 14px; font-size: 12px; }
+    .hint a { color: #7dd87d; }
+    kbd {
+      border: 1px solid #2a3a2a; border-radius: 3px;
+      padding: 1px 5px; margin: 0 2px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="hud-preview"></div>
+    <p class="hint">
+      <kbd>Enter</kbd> тап · <kbd>D</kbd> двойной · <kbd>↑</kbd><kbd>↓</kbd> листать
+      — <a href="/settings.html">настройки</a>
+    </p>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

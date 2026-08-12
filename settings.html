@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sergey AI — настройки</title>
+  <style>
+    :root {
+      --paper: #f7f6f2;
+      --ink: #16191c;
+      --muted: #6d7278;
+      --rule: #d9d7d0;
+      --live: #1f6f3f;
+      --alert: #a8341f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 28px 20px 64px;
+      background: var(--paper); color: var(--ink);
+      font: 400 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    main { max-width: 520px; margin: 0 auto; }
+
+    header { border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 4px; }
+    h1 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+    .sub { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+
+    /* Строка состояния — единственный акцент на странице */
+    .status {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 12px 0; border-bottom: 1px solid var(--rule);
+      font: 500 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .status[data-ok="true"]  { color: var(--live); }
+    .status[data-ok="false"] { color: var(--alert); }
+    .status::before { content: "●"; font-size: 9px; }
+
+    fieldset { border: 0; padding: 0; margin: 26px 0 0; }
+    legend {
+      font: 500 11px/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .14em; text-transform: uppercase;
+      color: var(--muted); padding: 0 0 10px;
+    }
+
+    label { display: block; margin-top: 16px; }
+    .lbl { display: block; font-size: 13px; font-weight: 500; margin-bottom: 5px; }
+    .note { display: block; font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+    input, select, textarea {
+      width: 100%; padding: 11px 12px;
+      border: 1px solid var(--rule); border-radius: 6px;
+      background: #fff; color: var(--ink);
+      font: 400 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--ink); outline-offset: 1px; border-color: var(--ink);
+    }
+    textarea { resize: vertical; min-height: 68px; }
+
+    button {
+      margin-top: 26px; width: 100%; padding: 14px;
+      border: 0; border-radius: 6px;
+      background: var(--ink); color: var(--paper);
+      font: 500 15px/1 inherit; letter-spacing: .01em;
+    }
+    button:active { transform: translateY(1px); }
+    button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+    #saved {
+      margin-top: 12px; font-size: 13px; color: var(--live);
+      min-height: 20px;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      #saved { transition: opacity .2s; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sergey AI</h1>
+    <p class="sub">Ключи хранятся на этом устройстве и никуда больше не уходят.</p>
+  </header>
+
+  <div class="status" id="status" data-ok="false">проверяю…</div>
+
+  <fieldset>
+    <legend>Распознавание речи</legend>
+
+    <label>
+      <span class="lbl">Ключ Soniox</span>
+      <input id="sttKey" type="password" autocomplete="off" spellcheck="false" placeholder="soniox_…">
+    </label>
+
+    <label>
+      <span class="lbl">Подсказки распознавания</span>
+      <textarea id="hints" spellcheck="false"
+        placeholder="Аня, Ануар, Кайрат, Джетбрейнс, Кубернетес"></textarea>
+      <span class="note">Имена и термины, которые распознаётся неверно. Через запятую.</span>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Языковая модель</legend>
+
+    <label>
+      <span class="lbl">Провайдер</span>
+      <select id="provider">
+        <option value="anthropic">Anthropic</option>
+        <option value="openai">OpenAI-совместимый</option>
+      </select>
+    </label>
+
+    <label>
+      <span class="lbl">Ключ API</span>
+      <input id="llmKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+    </label>
+
+    <label>
+      <span class="lbl">Модель</span>
+      <input id="model" spellcheck="false" placeholder="claude-haiku-4-5-20251001">
+    </label>
+
+    <label>
+      <span class="lbl">Адрес API</span>
+      <input id="baseUrl" spellcheck="false" placeholder="https://api.anthropic.com">
+      <span class="note">Укажите свой прокси, если телефон в сети неподдерживаемого региона.</span>
+    </label>
+  </fieldset>
+
+  <button id="save">Сохранить</button>
+  <p id="saved" role="status" aria-live="polite"></p>
+</main>
+
+<script type="module" src="/src/settings/settings.ts"></script>
+</body>
+</html>

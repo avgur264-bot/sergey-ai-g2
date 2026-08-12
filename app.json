@@ -1,0 +1,36 @@
+{
+  "package_id": "com.sergey.aiassistant",
+  "edition": "202601",
+  "name": "Sergey AI",
+  "version": "0.1.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.12",
+  "entrypoint": "index.html",
+  "settings_page": "settings.html",
+  "description": "Голосовой ассистент: вопрос голосом, короткий ответ на HUD, таймеры и заметки.",
+  "permissions": [
+    {
+      "name": "g2-microphone",
+      "desc": "Запись голосового запроса для распознавания речи."
+    },
+    {
+      "name": "location",
+      "desc": "Определение текущего города для запроса погоды."
+    },
+    {
+      "name": "network",
+      "desc": "Запросы к сервисам распознавания речи, языковой модели, поиска и календаря.",
+      "whitelist": [
+        "https://stt-rt.soniox.com",
+        "https://api.anthropic.com",
+        "https://api.open-meteo.com",
+        "https://api.tavily.com",
+        "https://api.telegram.org",
+        "https://www.googleapis.com"
+      ]
+    }
+  ],
+  "supported_languages": [
+    "en"
+  ]
+}

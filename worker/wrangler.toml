@@ -1,0 +1,10 @@
+name = "sergey-ai-proxy"
+main = "index.ts"
+compatibility_date = "2026-08-01"
+
+# Секреты задаются командой, а не здесь:
+#   wrangler secret put PROXY_TOKEN
+#   wrangler secret put ANTHROPIC_API_KEY
+#   wrangler secret put GOOGLE_CLIENT_ID
+#   wrangler secret put GOOGLE_CLIENT_SECRET
+#   wrangler secret put GOOGLE_REFRESH_TOKEN
