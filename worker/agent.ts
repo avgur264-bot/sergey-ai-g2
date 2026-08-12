@@ -35,9 +35,19 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors() });
     if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
+    // Настройка не доделана — говорим об этом прямо на экране очков.
+    // Код ошибки тут бесполезен: очки покажут своё «network error», и
+    // человек останется без единой подсказки, что именно не так.
+    if (!env.ANTHROPIC_API_KEY) {
+      return chatReply('Не задан ANTHROPIC_API_KEY в настройках воркера.');
+    }
+    if (!env.AGENT_TOKEN) {
+      return chatReply('Не задан AGENT_TOKEN в настройках воркера.');
+    }
+
     const auth = req.headers.get('authorization') ?? '';
     if (auth !== `Bearer ${env.AGENT_TOKEN}`) {
-      return json({ error: 'unauthorized' }, 401);
+      return chatReply('Токен не совпадает с AGENT_TOKEN воркера.');
     }
 
     let body: any;

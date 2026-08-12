@@ -2,7 +2,7 @@
 // и проверяем форму ответа, авторизацию и поведение при сбое.
 import assert from 'node:assert/strict';
 
-const mod = await import('../worker/agent.ts');
+const mod = await import(process.env.BUNDLE ? '../worker/agent.bundle.js' : '../worker/agent.ts');
 const worker = mod.default;
 
 const env = { AGENT_TOKEN: 'secret', ANTHROPIC_API_KEY: 'sk-ant-test', CITY: 'Алматы' };
@@ -13,10 +13,20 @@ const post = (body, token = 'secret') => new Request('https://agent.test/', {
   body: JSON.stringify(body),
 });
 
-// 1. Чужой токен внутрь не пускаем.
+// 1. Чужой токен внутрь не пускаем, но объясняем это человеку словами:
+// код ошибки очки покажут как безликое «network error».
 {
   const res = await worker.fetch(post({ messages: [] }, 'wrong'), env);
-  assert.equal(res.status, 401, 'чужой токен должен отклоняться');
+  const d = await res.json();
+  assert.equal(res.status, 200, 'ответ должен доходить до экрана');
+  assert.match(d.choices[0].message.content, /Токен не совпадает/);
+}
+
+// 1a. Незаполненные настройки тоже видны на экране, а не молчат.
+{
+  const res = await worker.fetch(post({ messages: [] }), { AGENT_TOKEN: 'secret' });
+  const d = await res.json();
+  assert.match(d.choices[0].message.content, /ANTHROPIC_API_KEY/);
 }
 
 // 2. Обычный вопрос — ответ в форме OpenAI.
