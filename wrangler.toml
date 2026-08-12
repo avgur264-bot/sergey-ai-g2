@@ -1,0 +1,24 @@
+# Развёртывание агента прямо из GitHub — без командной строки.
+#
+# Этот файл лежит в корне намеренно: Cloudflare Workers Builds ищет
+# wrangler.toml именно там, когда подключаешь репозиторий через
+# «Create application → Continue with GitHub». Так код попадает на
+# сервер без ручного копирования в редактор — на телефоне вставить
+# туда несколько сотен строк попросту невозможно.
+#
+# После первого развёртывания задайте два секрета в панели:
+#   Settings → Variables and Secrets → Add
+#     ANTHROPIC_API_KEY = ваш ключ sk-ant-…
+#     AGENT_TOKEN       = любая длинная строка, её же в Even → Token
+#
+# Дальше каждый push в main разворачивает новую версию сам.
+
+name = "sergey-ai-agent"
+main = "worker/agent.ts"
+compatibility_date = "2026-08-01"
+
+[vars]
+# Город для запросов «рядом». Можно оставить пустым.
+CITY = ""
+# Модель. Пусто = claude-sonnet-5.
+MODEL = ""
