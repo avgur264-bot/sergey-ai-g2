@@ -122,7 +122,27 @@ export class Router {
       }
     }
 
-    // 2. Обычный путь через модель
+    // 2. Обычный путь через модель.
+    //
+    // Историю правим транзакционно: если ход сорвётся (сеть, лимит,
+    // отмена), возвращаем её в исходное состояние. Иначе останется
+    // вопрос без ответа, и следующий — уточняющий — запрос уйдёт с
+    // двумя репликами пользователя подряд; одна неудача превращалась
+    // бы в цепочку.
+    //
+    // Храним именно копию, а не длину: trim() внутри хода может
+    // укоротить историю, и восстановление по длине насоздавало бы
+    // пустых элементов вместо реплик.
+    const snapshot = [...this.history];
+    try {
+      return await this.runTurn(input, cb, signal);
+    } catch (e) {
+      this.history = snapshot;
+      throw e;
+    }
+  }
+
+  private async runTurn(input: string, cb: RouterCallbacks, signal: AbortSignal): Promise<Turn> {
     const memory = await loadMemory(this.bridge);
     const system = memory.length
       ? `${SYSTEM_PROMPT}\n\nЧто ты знаешь о пользователе:\n${memory.map((m) => `- ${m}`).join('\n')}`
@@ -210,10 +230,26 @@ export class Router {
     }
   }
 
-  /** История короткая: 4 последние реплики. Контекст «а завтра?» работает. */
+  /**
+   * История короткая: несколько последних реплик, чтобы работал контекст
+   * «а завтра?». Обрезаем аккуратно.
+   *
+   * Простой slice(-N) ломал диалог: срез мог начаться с результата
+   * инструмента, чей вызов остался за границей окна. Провайдер такое
+   * отвергает («tool_result без предшествующего tool_use»), и запрос
+   * падал с 400 — причём именно на уточняющем вопросе, когда история
+   * успевала дорасти до лимита. Поэтому после среза сдвигаем начало до
+   * первой полноценной реплики пользователя.
+   */
   private trim() {
     const MAX = 8;
-    if (this.history.length > MAX) this.history = this.history.slice(-MAX);
+    if (this.history.length <= MAX) return;
+
+    let cut = this.history.slice(-MAX);
+    while (cut.length && !(cut[0].role === 'user' && !cut[0].toolCallId)) {
+      cut = cut.slice(1);
+    }
+    this.history = cut;
   }
 
   reset() { this.history = []; }

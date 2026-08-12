@@ -368,3 +368,77 @@ test('новый экран отменяет автопрокрутку прош
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(bridge.calls.length, before, 'после смены экрана рисовать нечего');
 });
+
+// ─── Диалог: уточняющие вопросы ──────────────────────────────
+
+import { Router } from '../src/agent/router.ts';
+import { Registry } from '../src/agent/registry.ts';
+
+/** LLM-заглушка: запоминает, какую историю ей передали. */
+function fakeLlm(behaviour: (n: number) => any) {
+  const seen: any[][] = [];
+  let n = 0;
+  return {
+    seen,
+    llm: {
+      async complete(o: any) {
+        seen.push(o.messages.map((m: any) => ({ role: m.role, content: m.content })));
+        const r = behaviour(n++);
+        if (r instanceof Error) throw r;
+        return r;
+      },
+    },
+  };
+}
+
+const noopCb = {
+  onTool() {},
+  onDelta() {},
+  async onConfirm() { return true; },
+};
+
+const fakeBridgeForRouter = { async get() { return null; }, async set() {} };
+
+test('уточняющий вопрос уходит вместе с предыдущей репликой', async () => {
+  const { llm, seen } = fakeLlm(() => ({ text: 'Ответ', toolCalls: [] }));
+  const r = new Router(llm as any, new Registry(), fakeBridgeForRouter as any, {});
+
+  await r.handle('какая столица Японии', noopCb, new AbortController().signal);
+  await r.handle('а население', noopCb, new AbortController().signal);
+
+  const second = seen[1];
+  assert.equal(second.length, 3, 'вопрос, ответ, уточнение');
+  assert.equal(second[0].content, 'какая столица Японии');
+  assert.equal(second[1].role, 'assistant');
+  assert.equal(second[2].content, 'а население');
+});
+
+test('после сбоя история не ломается и следующий вопрос уходит корректно', async () => {
+  // РЕАЛЬНЫЙ БАГ: упавший ход оставлял в истории вопрос без ответа,
+  // и следующий запрос уходил с двумя репликами пользователя подряд.
+  const { llm, seen } = fakeLlm((n) =>
+    n === 0 ? new Error('LLM 500') : { text: 'Ответ', toolCalls: [] });
+  const r = new Router(llm as any, new Registry(), fakeBridgeForRouter as any, {});
+
+  await assert.rejects(() => r.handle('первый', noopCb, new AbortController().signal));
+  await r.handle('второй', noopCb, new AbortController().signal);
+
+  const after = seen[1];
+  assert.equal(after.length, 1, 'от упавшего хода в истории ничего не остаётся');
+  assert.equal(after[0].content, 'второй');
+});
+
+test('история не начинается с висячего результата инструмента', async () => {
+  // Срез длинной истории мог начаться с tool_result, чей вызов остался
+  // за окном, — провайдер отвергает такой запрос.
+  const { llm, seen } = fakeLlm(() => ({ text: 'Ответ', toolCalls: [] }));
+  const r = new Router(llm as any, new Registry(), fakeBridgeForRouter as any, {});
+
+  for (let i = 0; i < 8; i++) {
+    await r.handle(`вопрос ${i}`, noopCb, new AbortController().signal);
+  }
+
+  for (const msgs of seen) {
+    assert.equal(msgs[0].role, 'user', 'история всегда начинается с реплики пользователя');
+  }
+});
