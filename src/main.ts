@@ -154,7 +154,7 @@ function onLifecycle(e: string) {
   if (e === 'foreground_exit' || e === 'force_exit') {
     void stopWake();
     stt?.close();
-    bridge.stopMic().catch(() => {});
+    void setMic(false);
     cancel();
   }
 }
@@ -203,7 +203,7 @@ async function onStateChange(s: string) {
     pendingError = null;
     await hud.status(screen.title, screen.body);
     stt?.close();
-    await bridge.stopMic().catch(() => {});
+    await setMic(false);
     if (errorExitTimer) clearTimeout(errorExitTimer);
     // Ошибку с подробностями держим на экране дольше — её надо успеть
     // прочитать, а не поймать взглядом за две секунды.
@@ -218,6 +218,37 @@ async function onStateChange(s: string) {
   } else {
     void stopWake();
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Микрофон
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Микрофоном командуют из нескольких мест: ожидание голосовой команды,
+ * приём вопроса, обработка ошибок, уход в фон. Вызовы асинхронные, и без
+ * общей очереди они могут дойти до очков не в том порядке — например,
+ * запоздавшее «выключить» от закрытого ожидания глушит микрофон уже
+ * посреди заданного вопроса.
+ *
+ * Здесь команды выстроены в цепочку, и перед выполнением каждая
+ * сверяется с последним намерением: устаревшие просто не выполняются.
+ */
+let micWanted = false;
+let micQueue: Promise<void> = Promise.resolve();
+
+function setMic(on: boolean): Promise<void> {
+  micWanted = on;
+  micQueue = micQueue.then(async () => {
+    if (micWanted !== on) return;   // намерение уже устарело
+    try {
+      if (on) await bridge.startMic();
+      else await bridge.stopMic();
+    } catch (e) {
+      console.warn('[mic]', on ? 'не включился' : 'не выключился', e);
+    }
+  });
+  return micQueue;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -250,7 +281,7 @@ async function startWake() {
   try {
     await wake.open();
     bridge.onPcm((chunk) => wake?.push(chunk));
-    await bridge.startMic();
+    await setMic(true);
     await hud.status('SERGEY AI', `Скажите «${cfg.wakeWord}» или тапните`);
   } catch (e) {
     console.warn('[wake] не удалось начать ожидание:', e);
@@ -263,11 +294,16 @@ async function stopWake() {
   wake.close();
   wake = null;
   // Микрофон гасим только если он не нужен активной сессии вопроса.
-  if (!stt) await bridge.stopMic().catch(() => {});
+  if (!stt) await setMic(false);
 }
 
 /** Обращение прозвучало — отделяем вопрос от имени. */
 async function onWakeHeard(text: string) {
+  // Непрерывное распознавание может прислать несколько фраз подряд.
+  // Реагируем только в покое: иначе второе срабатывание перезапустит
+  // ожидание уже посреди принимаемого вопроса.
+  if (fsm.state !== 'IDLE') return;
+
   const word = cfg.wakeWord.toLowerCase().trim();
   if (!word) return;
 
@@ -309,7 +345,7 @@ async function startListening() {
   try {
     await stt.open();
     bridge.onPcm((chunk) => stt?.push(chunk));
-    await bridge.startMic();
+    await setMic(true);
   } catch (e) {
     console.error(e);
     // Сюда попадает и сбой открытия сокета распознавания, и отказ
@@ -320,7 +356,7 @@ async function startListening() {
 }
 
 async function think(question: string) {
-  await bridge.stopMic().catch(() => {});
+  await setMic(false);
   stt = null;
 
   if (!fsm.to('THINKING')) return;
@@ -380,7 +416,7 @@ function resolveConfirm(ok: boolean) {
 function cancel() {
   abort?.abort();
   stt?.close();
-  bridge.stopMic().catch(() => {});
+  void setMic(false);
   fsm.force('IDLE');
 }
 

@@ -31,6 +31,16 @@ jobs:
 
       - run: npm test
 
+      # Дымовые прогоны настоящих страниц в эмуляции браузера: ловят то,
+      # что модульные тесты не видят — падение скрипта на старте, разрыв
+      # цепочки «речь → инструмент → ответ», молчащую голосовую активацию.
+      - name: Дымовой прогон
+        run: |
+          npx vite build
+          node --experimental-strip-types scripts/smoke-settings.mjs
+          node --experimental-strip-types scripts/smoke-main.mjs
+          WAKE=1 node --experimental-strip-types scripts/smoke-main.mjs
+
       - name: Собрать под GitHub Pages
         run: npm run build
         env:
