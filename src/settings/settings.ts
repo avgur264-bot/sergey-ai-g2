@@ -33,6 +33,17 @@ async function init() {
 
   render(cfg);
 
+  // Проверяем формат по ходу ввода: узнать, что вставлен не тот ключ,
+  // лучше сразу, а не после похода к очкам и ошибки на их экране.
+  const recheck = () => render({
+    sttKey: fields.sttKey.value.trim(),
+    llmKey: fields.llmKey.value.trim(),
+    provider: fields.provider.value as Config['provider'],
+  });
+  fields.sttKey.addEventListener('input', recheck);
+  fields.llmKey.addEventListener('input', recheck);
+  fields.provider.addEventListener('change', recheck);
+
   // Смена провайдера подставляет разумные значения, но не затирает
   // то, что человек уже вписал вручную.
   fields.provider.addEventListener('change', () => {
@@ -62,11 +73,38 @@ async function init() {
   });
 }
 
+/**
+ * Ключи двух разных сервисов легко перепутать местами: оба выглядят как
+ * длинная строка. Формат у них разный, и это стоит проверить прямо в
+ * форме — иначе ошибка всплывёт только на очках как «КЛЮЧ НЕ ПРИНЯТ»,
+ * без намёка на то, какой именно ключ не тот.
+ */
+function keyWarning(cfg: Partial<Config>): string {
+  const llm = (cfg.llmKey ?? '').trim();
+  const stt = (cfg.sttKey ?? '').trim();
+
+  if (llm && stt && llm === stt) {
+    return 'Ключ модели и ключ Deepgram совпадают — вставлен один и тот же.';
+  }
+  if (llm && cfg.provider === 'anthropic' && !llm.startsWith('sk-ant-')) {
+    return 'Ключ Anthropic должен начинаться с sk-ant- — похоже, вставлен не тот ключ.';
+  }
+  if (llm && cfg.provider === 'openai' && !llm.startsWith('sk-')) {
+    return 'Ключ OpenAI должен начинаться с sk-.';
+  }
+  if (stt && stt.startsWith('sk-')) {
+    return 'В поле Deepgram похоже вставлен ключ языковой модели.';
+  }
+  return '';
+}
+
 function render(cfg: Partial<Config>) {
   const ready = Boolean(cfg.sttKey && cfg.llmKey);
-  statusEl.dataset.ok = String(ready);
-  statusEl.textContent = ready
-    ? 'готово к работе'
+  const warn = keyWarning(cfg);
+
+  statusEl.dataset.ok = String(ready && !warn);
+  statusEl.textContent = warn ? warn
+    : ready ? 'готово к работе'
     : !cfg.sttKey && !cfg.llmKey ? 'нужны оба ключа'
     : !cfg.sttKey ? 'нужен ключ Deepgram'
     : 'нужен ключ модели';
