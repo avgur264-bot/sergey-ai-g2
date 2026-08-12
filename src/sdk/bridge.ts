@@ -293,6 +293,7 @@ class MockBridge implements Bridge {
 // ─────────────────────────────────────────────────────────────
 
 let instance: Bridge | null = null;
+export let lastBackend: 'native' | 'mock' | null = null;
 
 export async function getBridge(): Promise<Bridge> {
   if (instance) return instance;
@@ -314,15 +315,18 @@ export async function getBridge(): Promise<Bridge> {
 
   if (!hasNativeHost) {
     console.warn('[bridge] flutter_inappwebview не найден — работаю в моке для браузера');
+    lastBackend = 'mock';
     instance = new MockBridge();
     return instance;
   }
 
   try {
     const sdk = await waitForEvenAppBridge();
+    lastBackend = 'native';
     instance = new SdkBridge(sdk);
   } catch (e) {
     console.warn('[bridge] нативный хост есть, но SDK не инициализировался:', e);
+    lastBackend = 'mock';
     instance = new MockBridge();
   }
   return instance;

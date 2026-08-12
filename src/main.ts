@@ -1,4 +1,4 @@
-import { getBridge, type Bridge, type Gesture } from './sdk/bridge.ts';
+import { getBridge, lastBackend, type Bridge, type Gesture } from './sdk/bridge.ts';
 import { Hud } from './hud/renderer.ts';
 import { Machine } from './state/machine.ts';
 import { SttSession } from './audio/stt.ts';
@@ -30,9 +30,14 @@ async function main() {
 
   // Без ключей смысла запускаться нет — но и чёрного экрана быть не должно.
   if (!cfg.sttKey || !cfg.llmKey) {
+    // ВРЕМЕННАЯ ДИАГНОСТИКА: показываем тип моста и сырое значение из
+    // хранилища, чтобы понять, почему настройки не долетают. Убрать
+    // после того, как разберёмся.
+    const raw = await bridge.get('cfg');
+    const debug = `мост: ${lastBackend ?? '?'}\nсырое cfg: ${raw ? raw.slice(0, 80) : 'null'}`;
     await hud.boot({
       title: 'SERGEY AI',
-      body: 'Откройте настройки на телефоне и введите ключи API.',
+      body: `Откройте настройки на телефоне и введите ключи API.\n\n${debug}`,
     });
     return;
   }
